@@ -22,11 +22,8 @@ console.log("Exit with Code:", code, "\n");
 console.timeEnd("Runtime");
 console.log("\n\n");
 
-jasonFlow.getVars.length !== 0 && console.table(jasonFlow.getVars);
-// jasonFlow.getConsts.length !== 0 &&
-//   console.table([...jasonFlow.getConsts]);p
+jasonFlow.getVars.length !== 0 && console.table(jasonFlow.getVarsDebug);
 
-// jasonFlow.getVars.length !== 0 && console.log(jasonFlow.getVars);
 
 
 

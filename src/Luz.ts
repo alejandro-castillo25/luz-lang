@@ -15,9 +15,33 @@ interface LuzVar {
 export type LuzVars = Map<string, any>;
 
 export type StructType = {
-  __type: "arr" | "vec";
+  __type: "arr" | "vec" | "set";
   __value: Array<any> | StructType;
 };
+
+export class LuzSet<T> extends Set<T> {
+  private _last: T | undefined = undefined;
+
+  constructor(val?: any) {
+    if (Array.isArray(val)) {
+      super(val);
+
+      this._last = val[val.length - 1];
+      return;
+    }
+
+    super(val);
+  }
+  add(value: T): this {
+    super.add(value);
+    this._last = value;
+    return this;
+  }
+
+  get last() {
+    return this._last;
+  }
+}
 
 export const enum ExitCode {
   Success,
@@ -44,7 +68,6 @@ export class ContinueSignal extends Error {
     super("Continue statement");
   }
 }
-
 
 export class Luz {
   private obj: Record<string, any> = {};
@@ -79,6 +102,11 @@ export class Luz {
 
     "lenof",
     "typeof",
+    "copyof",
+    "sizeof",
+
+    "firstof",
+    "lastof",
 
     "log",
     "logln",
@@ -96,10 +124,12 @@ export class Luz {
     "vec",
     "set", //! Proposal
     "inf",
+    "",
   ] as const;
 
+  //! the \r is not detected, but WHY
   public static tokensRegExp: RegExp =
-    /\.\.\=?|(?:!|@)\[|\*\*\=?|~\/\=?|<<|>>>?|~|-(?:-|=)|[<>]?\-[<>]?|\+\+|(\d|_)+XL|(?:\d|_)*\.?\d+|(?:#|\/\/).*|\/\*(?:.|\n)*?\*\/|\'(?:.|\n)*?(?<!\\)\'|\"(?:.|\n)*?(?<!\\)\"|(?:[=!\-\+*<>%\^\?]|\/\/?)\=?|[\$\w]+|\.|\|\||[\(\)\[\]\{\}%\?:]|\&\&|[&|^]|(?<!(?:;|^));/gi;
+    /\?\?|<=>|\,|\.\.\=?|\@\{|!\[|\*\*\=?|~\/\=?|<<|>>>?|~|-(?:-|=)|[<>]?\-[<>]?|\+\+|(\d|_)+XL|(?:\d|_)*\.?\d+|(?:#|\/\/).*|\/\*(?:.|\n|\r)*?\*\/|\'(?:.|\n|\r)*?(?<!\\)\'|\"(?:.|\n|\r)*?(?<!\\)\"|\`(?:.|\n|\r)*?(?<!\\)\`|(?:[=!\-\+*<>%\^\?]|\/\/?)\=?|[\$\w]+|\.|\|\||[\(\)\[\]\{\}%\?:]|\&\&|[&|^]|(?<!(?:;|^));/gi;
 
   // public static tokensRegExp: RegExp =
   //   /\.\.\=?|(?:!|@)\[|\*\*\=?|~\/\=?|<<|>>>?|~|-(?:-|=)|[<>]?\-[<>]?|\+\+|(\d|_)+XL|(?:\d|_)*\.?\d+|(?:#|\/\/).*|\/\*(?:[^\r]|\n)*?\*\/|\'(?:[^\r\']|\\.)*?(?<!\\)\'|\"(?:[^\r\"]|\\.)*?(?<!\\)\"|(?:[=!\-\+*<>%\^\?]|\/\/?)\=?|[\$\w]+|\.|\|\||[\(\)\[\]\{\}%\?:]|\&\&|[&|^]|(?<!(?:;|^));/gi;
@@ -123,8 +153,8 @@ export class Luz {
         )
       : new Map();
 
-    this.expr = expr.replace(/\r/g, "");
-    // this.expr = expr;
+    // this.expr = expr.replace(/\r/g, "");
+    this.expr = expr;
     this.pipeStdin =
       process.stdin.isTTY === true
         ? null
@@ -167,7 +197,39 @@ export class Luz {
       return;
     }
 
+    const swapResult = this.parseSwap();
+    if (swapResult !== null) return swapResult;
+
     return this.parseAssignment();
+  }
+
+  private parseSwap(): any {
+    const startPos = this.pos;
+    const left = this.tryParseLValue();
+    if (left) {
+      if (this.peek() === "<=>") {
+        this.next();
+        const right = this.tryParseLValue();
+        if (!right)
+          throw {
+            message: "Right side of swap must be an l-value",
+            code: ExitCode.SystaxError,
+          };
+
+        const a = left.get();
+        const b = right.get();
+        if (a !== b) {
+          left.set(b);
+          right.set(a);
+          return true;
+        } else {
+          return false;
+        }
+      }
+    }
+    //! Reset pos
+    this.pos = startPos;
+    return null;
   }
 
   private parseBlock(): any {
@@ -188,6 +250,43 @@ export class Luz {
       if (!outerKeys.has(name)) this.vars.delete(name);
 
     return lastVal;
+  }
+
+  private getUnderlyingValue(obj: any): any {
+    return typeof obj === "object" && obj !== null && "__type" in obj
+      ? obj.__value
+      : obj;
+  }
+  private checkHas(left: any, right: any): boolean {
+    if (left === null || left === undefined) return false;
+
+    // Handle Luz structured types
+    if (typeof left === "object" && left !== null && "__type" in left) {
+      const type = left.__type;
+      const value = left.__value;
+      switch (type) {
+        case "set":
+          return value.has(right);
+        case "arr":
+        case "vec":
+          return value.includes(right);
+        default:
+          throw {
+            message: `'has' not supported for ${type}`,
+            code: ExitCode.SemanticError,
+          };
+      }
+    }
+
+    // Handle JavaScript types
+    if (Array.isArray(left)) return left.includes(right);
+    if (typeof left === "string") return left.includes(String(right));
+    if (left instanceof Set) return left.has(right);
+
+    throw {
+      message: `'has' not supported for ${typeof left}`,
+      code: ExitCode.SemanticError,
+    };
   }
 
   private skipStatementOrBlock(): void {
@@ -239,7 +338,7 @@ export class Luz {
   }
 
   private parseLoopExpression(): any {
-    this.next(); // Consume "loop"
+    this.next();
 
     let loopVariable: string | null = null;
     let iterable: any;
@@ -248,13 +347,11 @@ export class Luz {
     let conditionStart: number = -1;
     let conditionEnd: number = -1;
 
-    // Check for for-in loop syntax: loop <var> in <expr>
     if (this.isVariableToken(this.peek()) && this.peek(1) === "in") {
-      loopVariable = this.next(); 
+      loopVariable = this.next();
       this.next();
       iterable = this.parseExpression();
     } else if (this.peek() !== "{") {
-    
       isWhileLoop = true;
       conditionStart = this.pos;
 
@@ -272,10 +369,9 @@ export class Luz {
       conditionEnd = this.pos - 1;
     }
 
-    // Parse the loop body
-    if (this.peek() !== "{") {
+    if (this.peek() !== "{")
       throw { message: "Expected '{' after loop", code: ExitCode.SystaxError };
-    }
+
     this.next();
 
     const loopBodyStart = this.pos;
@@ -296,11 +392,10 @@ export class Luz {
 
     try {
       if (loopVariable !== null) {
-        // For-in 
+        // For-in
         const elements = this.getIterableElements(iterable);
 
         for (const element of elements) {
-
           this.vars.set(loopVariable, { value: element });
 
           const varsBeforeIteration = new Set(this.vars.keys());
@@ -320,7 +415,6 @@ export class Luz {
               throw error;
             }
           } finally {
-          
             for (const name of Array.from(this.vars.keys())) {
               if (!varsBeforeIteration.has(name) && name !== loopVariable) {
                 this.vars.delete(name);
@@ -331,7 +425,6 @@ export class Luz {
       } else if (isWhileLoop) {
         // While
         while (true) {
-
           const conditionValue = this.evaluateCondition(
             conditionStart,
             conditionEnd
@@ -392,7 +485,6 @@ export class Luz {
     } catch (error) {
       if (!(error instanceof BreakSignal)) throw error;
     } finally {
-
       for (const name of Array.from(this.vars.keys())) {
         if (!varsBeforeLoop.has(name)) {
           this.vars.delete(name);
@@ -411,6 +503,66 @@ export class Luz {
     }
 
     return finalValue;
+  }
+
+  private tryParseLValue(): { get: () => any; set: (v: any) => void } | null {
+    const initialState = { pos: this.pos, vars: new Map(this.vars) };
+    let varName: string | null = null;
+    const indices: any[] = [];
+
+    try {
+      if (!this.isVariableToken(this.peek())) return null;
+      varName = this.next();
+
+      // Parse indices
+      while (this.peek() === "[") {
+        this.next();
+        const index = this.parseExpression();
+        indices.push(index);
+        if (this.peek() !== "]") throw new Error("Expected ]");
+        this.next();
+      }
+
+      // Validate variable exists and is mutable
+      if (!this.vars.has(varName))
+        throw new Error(`Undefined variable '${varName}'`);
+      const varData = this.vars.get(varName)!;
+      if (varData.const) throw new Error(`Cannot modify constant '${varName}'`);
+
+      return {
+        get: () => {
+          let value = varData.value;
+          for (const indexExpr of indices) {
+            const idx = this.evalIndex(indexExpr, value);
+            value = value.__value[idx];
+          }
+          return value;
+        },
+        set: (newValue: any) => {
+          let container = varData.value;
+          const resolvedIndices = [];
+          for (const indexExpr of indices) {
+            const idx = this.evalIndex(indexExpr, container);
+            resolvedIndices.push(idx);
+            container = container.__value[idx];
+          }
+          if (resolvedIndices.length === 0) {
+            varData.value = newValue;
+          } else {
+            let parent = varData.value;
+            for (let i = 0; i < resolvedIndices.length - 1; i++) {
+              parent = parent.__value[resolvedIndices[i]!];
+            }
+            const lastIdx = resolvedIndices[resolvedIndices.length - 1];
+            parent.__value[lastIdx!] = newValue;
+          }
+        },
+      };
+    } catch (e) {
+      this.pos = initialState.pos;
+      this.vars = new Map(initialState.vars);
+      return null;
+    }
   }
 
   private getIterableElements(iterable: any): any[] {
@@ -511,6 +663,27 @@ export class Luz {
     }
 
     return resultVal;
+  }
+
+  private getType(value: any): (typeof Luz.TYPES)[number] {
+    if (typeof value === "object" && value !== null && "__type" in value) {
+      return value.__type;
+    }
+
+    switch (typeof value) {
+      case "number":
+        return Number.isFinite(value) ? "num" : "inf";
+      case "bigint":
+        return "xl";
+      case "boolean":
+        return "bool";
+      case "string":
+        return "str";
+      case "object":
+        return value === null ? "null" : "null";
+      default:
+        return "null";
+    }
   }
 
   private parseAssignment(): any {
@@ -635,7 +808,6 @@ export class Luz {
           break;
         case "object":
           if (result === null) type = "null";
-          else if (Array.isArray(result)) type = "arr";
           break;
         default:
           type = "null";
@@ -657,9 +829,12 @@ export class Luz {
                 message: `Cannot add '${rhs}' to an 'arr', use 'vec' instead`,
                 code: ExitCode.InvalidInstruction,
               };
+            } else if (current.__type === "vec") {
+              current.__value.push(rhs);
+            } else if (current.__type === "set") {
+              current.__value.add(rhs);
             }
 
-            current.__value.push(rhs);
             result = current;
           } else {
             result = current + rhs;
@@ -705,8 +880,8 @@ export class Luz {
             code: ExitCode.SemanticError,
           };
         }
-
         this.vars.get(varName)!.value = result;
+        existingVar.type = this.getType(result);
       } else {
         this.vars.set(varName, { value: result, const: isConst, type });
       }
@@ -726,22 +901,46 @@ export class Luz {
         if (op === "+") {
           if (
             typeof left === "object" &&
+            left !== null &&
             "__value" in left &&
             "__type" in left
           ) {
-            const __type = left.__type;
+            const __type: "arr" | "vec" | "set" = left.__type;
 
             if (__type === "arr") {
               throw {
                 message: `Cannot add '${right}' to an 'arr', use 'vec' instead`,
                 code: ExitCode.InvalidInstruction,
               };
+            } else if (__type === "vec") {
+              left.__value.push(right);
+            } else if (__type === "set") {
+              left.__value.add(right);
             }
+          } else if (
+            typeof right === "object" &&
+            right !== null &&
+            "__value" in right &&
+            "__type" in right
+          ) {
+            const __type: "arr" | "vec" | "set" = right.__type;
 
-            left = {
-              __type, // ? Here is assuming vec
-              __value: [...left.__value, right],
-            };
+            if (__type === "arr") {
+              throw {
+                message: `Cannot add '${left}' to an 'arr', use 'vec' instead`,
+                code: ExitCode.InvalidInstruction,
+              };
+            } else if (__type === "vec") {
+              left = {
+                __type,
+                __value: [left, ...right.__value],
+              };
+            } else if (__type === "set") {
+              left = {
+                __type,
+                __value: right.__value.add(left),
+              };
+            }
           } else left = left + right;
         } else {
           left = left - right;
@@ -805,15 +1004,37 @@ export class Luz {
   }
 
   private formatValue(value: any, visited: Set<any> = new Set()): string {
-    if (visited.has(value)) return `${value.__type === "vec" ? "!" : ""}[...]`; // circular
+    if (visited.has(value)) {
+      //? Circular reference handling
+      if (value.__type === "set") {
+        return "@{...}";
+      }
+      return `${value.__type === "vec" ? "!" : ""}[...]`;
+    }
 
     if (typeof value === "object" && value !== null && "__type" in value) {
       visited.add(value);
-      const elements = value.__value
-        .map((el: any) => this.formatValue(el, visited))
-        .join(" ");
-      visited.delete(value); // ! Cleanup after recursion
-      return value.__type === "vec" ? `![${elements}]` : `[${elements}]`;
+
+      let elements: string[];
+      if (value.__type === "set") {
+        elements = Array.from(value.__value).map((el: any) =>
+          this.formatValue(el, visited)
+        );
+      } else {
+        elements = value.__value.map((el: any) =>
+          this.formatValue(el, visited)
+        );
+      }
+
+      visited.delete(value);
+      switch (value.__type) {
+        case "vec":
+          return `![${elements.join(" ")}]`;
+        case "set":
+          return `@{${elements.join(" ")}}`;
+        default:
+          return `[${elements.join(" ")}]`;
+      }
     } else if (Array.isArray(value)) {
       visited.add(value);
       const elements = value
@@ -824,7 +1045,7 @@ export class Luz {
     }
 
     if (typeof value === "number" && !Number.isFinite(value)) return "inf";
-    return String(value); //? primitives!
+    return String(value);
   }
 
   private parseAs(): any {
@@ -834,52 +1055,78 @@ export class Luz {
       const op = this.peek();
       if (op === "as") {
         this.next();
-        const targetType = this.next() as (typeof Luz.TYPES)[number];
+        let targetType: (typeof Luz.TYPES)[number];
+
+        if (this.peek() === "typeof") {
+          this.next();
+
+          
+          const typeReference = this.parsePrimary();
+          targetType = this.getType(typeReference);
+        } else {
+          targetType = this.next() as (typeof Luz.TYPES)[number];
+        }
 
         if (!Luz.TYPES.includes(targetType)) {
           throw {
-            message: `Expected type after 'as', found '${targetType}'`,
-            code: ExitCode.InvalidInstruction,
+            message: `Invalid type '${targetType}' for casting`,
+            code: ExitCode.SemanticError,
           };
         }
 
-        const valueToCast =
-          typeof left === "object" && left !== null && "__type" in left
-            ? left.__value
-            : left;
+        const isStruct =
+          typeof left === "object" && left !== null && "__type" in left;
+        const valueToCast = isStruct ? left.__value : left;
 
         let castedValue: any;
 
-        if (targetType === "num") castedValue = Number(valueToCast);
-        else if (targetType === "xl") castedValue = BigInt(valueToCast);
-        else if (targetType === "str") castedValue = String(valueToCast);
-        else if (targetType === "bool") castedValue = Boolean(valueToCast);
-        else if (targetType === "null") castedValue = null;
-        else if (targetType === "maybe") castedValue = Math.random() > 0.5;
-        else if (targetType === "inf") castedValue = Infinity;
-        else if (
-          targetType === "vec" ||
-          targetType === "arr" ||
-          targetType === "set"
-        ) {
-          castedValue = valueToCast;
-        } else castedValue = valueToCast;
-
-        if (
-          targetType === "arr" ||
-          targetType === "vec" ||
-          targetType === "set"
-        ) {
-          left = { __type: targetType, __value: castedValue };
-        } else {
-          left = castedValue;
+        switch (targetType) {
+          case "num":
+            castedValue = Number(valueToCast);
+            break;
+          case "xl":
+            castedValue = BigInt(valueToCast);
+            break;
+          case "str":
+            castedValue = isStruct
+              ? this.formatValue(left)
+              : String(valueToCast);
+            break;
+          case "bool":
+            castedValue = Boolean(valueToCast);
+            break;
+          case "arr":
+            castedValue = Array.isArray(valueToCast)
+              ? valueToCast
+              : [valueToCast];
+            left = { __type: "arr", __value: castedValue };
+            continue;
+          case "vec":
+            castedValue = Array.isArray(valueToCast)
+              ? valueToCast
+              : [valueToCast];
+            left = { __type: "vec", __value: castedValue };
+            continue;
+          case "set":
+            castedValue =
+              valueToCast instanceof Set
+                ? valueToCast
+                : new LuzSet(valueToCast);
+            left = { __type: "set", __value: castedValue };
+            continue;
+          default:
+            castedValue = valueToCast;
         }
+
+        left = castedValue;
       } else {
         break;
       }
     }
+
     return left;
   }
+
   private parseBitwise(): any {
     let left = this.parseAs();
 
@@ -900,6 +1147,43 @@ export class Luz {
     }
 
     return left;
+  }
+
+  private calculateSize(value: any, visited: Set<any> = new Set()): number {
+    if (value === null) return 4;
+
+    if (typeof value === "object" && value !== null) {
+      if (visited.has(value)) return 0;
+      visited.add(value);
+    }
+
+    if (typeof value === "object" && "__type" in value) {
+      const elements = value.__value;
+      let size = 0;
+      switch (value.__type) {
+        case "arr":
+        case "vec":
+          for (const el of elements) size += this.calculateSize(el, visited);
+          break;
+        case "set":
+          for (const el of elements) size += this.calculateSize(el, visited);
+          break;
+      }
+      return size;
+    }
+
+    switch (typeof value) {
+      case "number":
+        return 8;
+      case "string":
+        return 2 * value.length;
+      case "boolean":
+        return 1;
+      case "bigint":
+        return 2 * value.toString().length;
+      default:
+        return 0;
+    }
   }
 
   private parseUnary(): any {
@@ -965,21 +1249,18 @@ export class Luz {
       };
       this.next();
 
-      if (";})][".includes(this.peek())) return getInput();
+      if (";})],{".includes(this.peek())) return getInput();
 
-      if (["==", "!=", "as", "+", "get"].includes(this.peek())) return getInput();
+      if (
+        //! "get"?
+        ["==", "!=", "as", "+", "get", "", "loop", "if"].includes(this.peek())
+      )
+        return getInput();
 
       const promptArg = this.parsePrimary();
-      const prompt = String(
-        typeof promptArg === "object" &&
-          promptArg !== null &&
-          "__type" in promptArg &&
-          "__value" in promptArg
-          ? promptArg.__value
-          : promptArg
-      );
+      const prompt = this.formatValue(promptArg); //? maybeeee
 
-      return getInput(this.formatValue(prompt));
+      return getInput(prompt);
     }
 
     if (op === "lenof") {
@@ -989,7 +1270,9 @@ export class Luz {
       if (typeof rhs === "string") {
         return rhs.length;
       } else if (rhs && typeof rhs === "object" && "__value" in rhs) {
-        return rhs.__value.length;
+        if (rhs.__type === "vec" || rhs.__type === "arr")
+          return rhs.__value.length;
+        else if (rhs.__type === "set") return rhs.__value.size;
       } else if (Array.isArray(rhs)) {
         return rhs.length;
       } else {
@@ -998,6 +1281,68 @@ export class Luz {
           code: ExitCode.SemanticError,
         };
       }
+    }
+
+    if (op === "copyof") {
+      this.next();
+      const rhs = this.parsePrimary();
+
+      if (typeof rhs === "object" && rhs !== null && "__value" in rhs)
+        return structuredClone(rhs);
+
+      return rhs;
+    }
+
+    if (op === "firstof") {
+      this.next();
+      const rhs = this.parsePrimary();
+
+      if (typeof rhs === "object" && rhs !== null && "__value" in rhs) {
+        const type: "vec" | "arr" | "set" = rhs.__type;
+
+        if (type === "vec" || type === "arr") {
+          return rhs.__value[0] ?? null;
+        } else if (type === "set") {
+          return rhs.__value.values().next().value ?? null;
+        }
+
+        return null; //This shouldn't be reached!
+      }
+
+      if (typeof rhs === "string") return rhs[0] ?? null;
+
+      throw {
+        message: `firstof is not supported for ${typeof rhs}`,
+        code: ExitCode.SemanticError,
+      };
+    } else if (op === "lastof") {
+      this.next();
+      const rhs = this.parsePrimary();
+
+      if (typeof rhs === "object" && rhs !== null && "__value" in rhs) {
+        const type: "vec" | "arr" | "set" = rhs.__type;
+
+        if (type === "vec" || type === "arr") {
+          return rhs.__value[rhs.__value.length - 1] ?? null;
+        } else if (type === "set") {
+          return rhs.__value.last ?? null;
+        }
+
+        return null; //This shouldn't be reached!
+      }
+
+      if (typeof rhs === "string") return rhs[rhs.length - 1] ?? null;
+
+      throw {
+        message: `lastof is not supported for ${typeof rhs}`,
+        code: ExitCode.SemanticError,
+      };
+    }
+
+    if (op === "sizeof") {
+      this.next();
+      const rhs = this.parsePrimary();
+      return this.calculateSize(rhs);
     }
 
     if (op === "typeof") {
@@ -1026,9 +1371,9 @@ export class Luz {
           case "boolean":
             typeStr = operand === true || operand === false ? "bool" : "maybe";
             break;
-          case "object":
-            typeStr = operand === null ? "null" : "arr";
-            break;
+          // case "object":
+          //   typeStr = operand === null ? "null" : "arr";
+          //   break;
           default:
             typeStr = "null";
         }
@@ -1136,16 +1481,33 @@ export class Luz {
     return left;
   }
 
-  private parseLogicalOr(): any {
+  private parseNullish(): any {
     let left = this.parseLogicalAnd();
 
-    while (this.peek() === "||") {
+    while (this.peek() === "??") {
       this.next();
 
       if (left) {
         this.parseLogicalAnd();
       } else {
         const right = this.parseLogicalAnd();
+
+        left = left ?? right;
+      }
+    }
+    return left;
+  }
+
+  private parseLogicalOr(): any {
+    let left = this.parseNullish();
+
+    while (this.peek() === "||") {
+      this.next();
+
+      if (left) {
+        this.parseNullish();
+      } else {
+        const right = this.parseNullish();
 
         left = left || right;
       }
@@ -1220,23 +1582,16 @@ export class Luz {
 
     while (true) {
       const op = this.peek();
-      if (op === "==" || op === "!=") {
+      if (op === "==" || op === "!=" || op === "has") {
         this.next();
         const right = this.parseComparison();
 
-        const leftVal =
-          typeof left === "object" && left !== null && "__type" in left
-            ? left.__value
-            : left;
-        const rightVal =
-          typeof right === "object" && right !== null && "__type" in right
-            ? right.__value
-            : right;
-
-        if (op === "==") {
-          left = leftVal === rightVal;
-        } else {
-          left = leftVal !== rightVal;
+        if (op === "==" || op === "!=") {
+          const leftVal = this.getUnderlyingValue(left);
+          const rightVal = this.getUnderlyingValue(right);
+          left = op === "==" ? leftVal === rightVal : leftVal !== rightVal;
+        } else if (op === "has") {
+          left = this.checkHas(left, right);
         }
       } else {
         break;
@@ -1332,16 +1687,62 @@ export class Luz {
   private parseArrLiteral(): any[] {
     const elements: any[] = [];
 
-    while (this.peek() !== "]" && this.pos < this.tokens.length) {
-      const element = this.parseExpression();
-      elements.push(element);
+    if (this.peek() === "]") {
+      this.next();
+      return elements;
     }
 
-    if (this.peek() !== "]") {
-      throw {
-        message: "Expected ']' after arr elements",
-        code: ExitCode.SystaxError,
-      };
+    const firstElement = this.parseExpression();
+
+    if (this.peek() === ";") {
+      this.next();
+
+      const lengthExpr = this.parseExpression();
+      const length = Number(lengthExpr);
+
+      if (isNaN(length) || length < 0 || !Number.isInteger(length)) {
+        throw {
+          message: `Invalid array length '${lengthExpr}'`,
+          code: ExitCode.SemanticError,
+        };
+      }
+
+      elements.push(...Array(length).fill(firstElement));
+
+      if (this.peek() !== "]") {
+        throw {
+          message: "Expected ']' after array length",
+          code: ExitCode.SystaxError,
+        };
+      }
+      this.next();
+
+      return elements;
+    } else {
+      elements.push(firstElement);
+      while (this.peek() !== "]") {
+        if (this.peek() === ",") this.next();
+        const element = this.parseExpression();
+        elements.push(element);
+      }
+      this.next();
+      return elements;
+    }
+  }
+
+  private parseSetLiteral(): LuzSet<any> {
+    const elements: LuzSet<any> = new LuzSet<any>();
+
+    if (this.peek() === "}") {
+      this.next();
+      return elements;
+    }
+
+    while (this.peek() !== "}") {
+      if (this.peek() === ",") this.next();
+      const element = this.parseExpression();
+
+      elements.add(element);
     }
 
     this.next();
@@ -1349,24 +1750,51 @@ export class Luz {
     return elements;
   }
 
-  private parseVecLiteral(): any[] {
+  private parseVecLiteral(): Array<any> {
     const elements: any[] = [];
 
-    while (this.peek() !== "]" && this.pos < this.tokens.length) {
-      const element = this.parseExpression();
-      elements.push(element);
+    if (this.peek() === "]") {
+      this.next();
+      return elements;
     }
 
-    if (this.peek() !== "]") {
-      throw {
-        message: "Expected ']' after vec elements",
-        code: ExitCode.SystaxError,
-      };
+    const firstElement = this.parseExpression();
+
+    if (this.peek() === ";") {
+      this.next();
+
+      const lengthExpr = this.parseExpression();
+      const length = Number(lengthExpr);
+
+      if (isNaN(length) || length < 0 || !Number.isInteger(length)) {
+        throw {
+          message: `Invalid vector length '${lengthExpr}'`,
+          code: ExitCode.SemanticError,
+        };
+      }
+
+      elements.push(...Array(length).fill(firstElement));
+
+      if (this.peek() !== "]") {
+        throw {
+          message: "Expected ']' after vector length",
+          code: ExitCode.SystaxError,
+        };
+      }
+      this.next();
+
+      return elements;
+    } else {
+      elements.push(firstElement);
+      while (this.peek() !== "]") {
+        if (this.peek() === ",") this.next();
+
+        const element = this.parseExpression();
+        elements.push(element);
+      }
+      this.next();
+      return elements;
     }
-
-    this.next();
-
-    return elements;
   }
 
   private parseContinueStatement(): any {
@@ -1413,6 +1841,11 @@ export class Luz {
       return { __type: "vec", __value: vec };
     }
 
+    if (tok === "@{") {
+      const set = this.parseSetLiteral();
+      return { __type: "set", __value: set };
+    }
+
     if (this.isNumberToken(tok)) {
       const num = tok.replace(/_/g, "");
       return Number(/^\.\d+$/.test(num) ? `0${num}` : num);
@@ -1444,7 +1877,7 @@ export class Luz {
 
       let value = this.vars.get(tok).value;
       while (this.peek() === "[") {
-        value = this.parseIndexAccess(value); 
+        value = this.parseIndexAccess(value);
       }
       return value;
     }
@@ -1513,7 +1946,7 @@ export class Luz {
   }
 
   private parseIndexAccess(container: any): any {
-    this.next(); // Consume '['
+    this.next();
     const indexExpr = this.parseExpression();
 
     //! console.log("huh: ",this.peek());
@@ -1588,6 +2021,62 @@ export class Luz {
       })
     );
   }
+
+  public get getVarsDebug() {
+    return this.getVars.map((el) => {
+      const { name, const: isConst, type } = el;
+      let valBefore = el.value;
+
+      function unwrapValue(
+        { __value, __type }: { __type: "vec" | "arr" | "set"; __value: any },
+        visited: Set<any> = new Set()
+      ): Array<any> {
+        const res: Array<any> = [];
+
+        if (visited.has(__value)) {
+          res.push(["..."]);
+          return res;
+        }
+
+        visited.add(__value);
+
+        try {
+          const elements = __type === "set" ? __value.values() : __value;
+          for (const el of elements) {
+            if (typeof el === "object" && el !== null && "__value" in el) {
+              res.push(unwrapValue(el, visited)); // Removed the spread operator
+            } else {
+              res.push(el);
+            }
+          }
+          return res;
+        } finally {
+          visited.delete(__value);
+        }
+      }
+
+      if (
+        typeof valBefore === "object" &&
+        valBefore !== null &&
+        "__value" in valBefore &&
+        "__type" in valBefore
+      ) {
+        valBefore = unwrapValue(valBefore);
+      } else if (typeof valBefore === "string")
+        //? Showing \n as \n..., cuz debug
+        valBefore = valBefore.replace(/\r\n?|\n/g, "\\n").replace(/\t/g, "\\t");
+
+      const value = valBefore;
+
+      return {
+        name,
+        value,
+        type,
+        const: isConst,
+      };
+    });
+  }
+
   public get getConsts() {
     return [...this.vars.entries()].map(
       (e: [string, LuzVar]) => e[1].const && e[0]
@@ -1617,7 +2106,9 @@ export class Luz {
   }
 
   private isStrToken(token: string): boolean {
-    return /^\'(?:.|\n)*?(?<!\\)\'|\"(?:.|\n)*?(?<!\\)\"$/g.test(token);
+    return /^\'(?:.|\n|\r)*?(?<!\\)\'|\"(?:.|\n|\r)*?(?<!\\)\"|\`(?:.|\n|\r)*?(?<!\\)\`$/g.test(
+      token
+    );
   }
 
   private isExtraLong(token: string): boolean {
@@ -1636,7 +2127,7 @@ export class Luz {
   }
 
   private isComment(token: string): boolean {
-    return /^(?:(?:#|\/\/).*|\/\*(?:.|\n)*\*\/)$/.test(token);
+    return /^(?:(?:#|\/\/).*|\/\*(?:.|\n|\r)*\*\/)$/.test(token);
   }
 
   private isVariableToken(token: string): boolean {
@@ -1665,6 +2156,7 @@ export class Luz {
       .substring(1, token.length - 1)
       .replace(/\\"/g, '"')
       .replace(/\\'/g, "'")
+      .replace(/\\`/g, "`")
       .replace(/\\n/g, "\n")
       .replace(/\\t/g, "\t");
 
