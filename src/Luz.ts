@@ -43,6 +43,44 @@ export class LuzSet<T> extends Set<T> {
   }
 }
 
+export class Range {
+  readonly __type = "ran";
+  constructor(public start: number, public end: number) {}
+
+  get __value() {
+    return this.generate();
+  }
+
+  private *generate() {
+    let current = this.start;
+    const step = Math.sign(this.end - this.start);
+
+    while (step > 0 ? current < this.end : current > this.end) {
+      yield current;
+      current += step;
+    }
+  }
+}
+
+export class XRange {
+  readonly __type = "xran";
+  constructor(public start: number, public end: number) {}
+
+  get __value() {
+    return this.generate();
+  }
+
+  private *generate() {
+    let current = this.start;
+    const step = Math.sign(this.end - this.start);
+
+    while (step > 0 ? current <= this.end : current >= this.end) {
+      yield current;
+      current += step;
+    }
+  }
+}
+
 export const enum ExitCode {
   Success,
   Error,
@@ -119,12 +157,13 @@ export class Luz {
     "bool",
     "str",
     "null",
-    "maybe", //? huhhhhh
+    "maybe", // ???
     "arr",
     "vec",
-    "set", //! Proposal
+    "set",
     "inf",
-    "",
+    "ran",
+    "xran",
   ] as const;
 
   //! the \r is not detected, but WHY
@@ -260,6 +299,13 @@ export class Luz {
   private checkHas(left: any, right: any): boolean {
     if (left === null || left === undefined) return false;
 
+    if (left instanceof Range || left instanceof XRange) {
+      if (typeof right !== "number") return false;
+      return left.__type === "ran"
+        ? right >= left.start && right < left.end
+        : right >= left.start && right <= left.end;
+    }
+
     // Handle Luz structured types
     if (typeof left === "object" && left !== null && "__type" in left) {
       const type = left.__type;
@@ -318,62 +364,152 @@ export class Luz {
     conditionStart: number,
     conditionEnd: number
   ): boolean {
-    const originalTokens = this.tokens;
     const originalPos = this.pos;
-
-    const conditionTokens = originalTokens.slice(
-      conditionStart,
-      conditionEnd + 1
-    );
-    this.tokens = conditionTokens;
-    this.pos = 0;
-
+    this.pos = conditionStart;
+    let value;
     try {
-      const value = this.parseExpression();
-      return Boolean(value);
+      value = this.parseExpression();
+      if (this.pos - 1 !== conditionEnd) {
+        throw new Error("Condition parsing did not consume expected tokens");
+      }
     } finally {
-      this.tokens = originalTokens;
       this.pos = originalPos;
     }
+    return Boolean(value);
   }
-
+  //!
   private parseLoopExpression(): any {
-    this.next();
+    this.next(); // Consume 'loop'
 
+    // Handle infinite loops first
+    if (this.peek() === "{") {
+      this.next(); // Consume '{'
+      const loopBodyStart = this.pos;
+      let depth = 1;
+
+      // Find matching closing brace
+      while (this.pos < this.tokens.length && depth > 0) {
+        const token = this.next();
+        if (token === "{") depth++;
+        if (token === "}") depth--;
+      }
+      const loopBodyEnd = this.pos - 1;
+
+      const varsBeforeLoop = new Set(this.vars.keys());
+      let finalValue = null;
+
+      try {
+        while (true) {
+          const varsBeforeIteration = new Set(this.vars.keys());
+          try {
+            this.pos = loopBodyStart;
+            while (this.pos < loopBodyEnd) {
+              this.parseStatement();
+            }
+          } catch (error) {
+            if (error instanceof BreakSignal) {
+              finalValue = error.value;
+              break;
+            } else if (error instanceof ContinueSignal) {
+              continue;
+            }
+            throw error;
+          } finally {
+            // Clean up variables created in this iteration
+            for (const name of Array.from(this.vars.keys())) {
+              if (!varsBeforeIteration.has(name)) {
+                this.vars.delete(name);
+              }
+            }
+          }
+        }
+      } finally {
+        // Clean up variables created in entire loop
+        for (const name of Array.from(this.vars.keys())) {
+          if (!varsBeforeLoop.has(name)) {
+            this.vars.delete(name);
+          }
+        }
+        this.pos = loopBodyEnd + 1;
+      }
+      return finalValue;
+    }
+
+    // Handle loops with conditions
     let loopVariable: string | null = null;
     let iterable: any;
-
     let isWhileLoop = false;
-    let conditionStart: number = -1;
-    let conditionEnd: number = -1;
+    let conditionStart = -1;
+    let conditionEnd = -1;
+    let hasParen = false;
 
-    if (this.isVariableToken(this.peek()) && this.peek(1) === "in") {
-      loopVariable = this.next();
+    // Check for optional parentheses
+    if (this.peek() === "(") {
+      hasParen = true;
       this.next();
+    }
+
+    // Parse loop header
+    if (this.isVariableToken(this.peek()) && this.peek(1) === "in") {
+      // For-in loop
+      loopVariable = this.next();
+      this.next(); // Consume 'in'
       iterable = this.parseExpression();
-    } else if (this.peek() !== "{") {
+
+      if (hasParen) {
+        if (this.peek() !== ")") {
+          throw {
+            message: "Expected ')' after for-in expression",
+            code: ExitCode.SystaxError,
+          };
+        }
+        this.next(); // Consume ')'
+      }
+    } else {
+      // While-style loop
       isWhileLoop = true;
       conditionStart = this.pos;
 
-      let depth = 0;
-      while (this.pos < this.tokens.length) {
-        const token = this.peek();
-        if (token === "{" && depth === 0) {
-          break;
+      if (hasParen) {
+        // Parenthesized condition
+        let depth = 0;
+        while (this.pos < this.tokens.length) {
+          const token = this.peek();
+          if (token === ")") {
+            if (depth === 0) {
+              conditionEnd = this.pos - 1;
+              this.next(); // Consume ')'
+              break;
+            }
+            depth--;
+          }
+          if (token === "(") depth++;
+          this.next();
         }
-        if (token === "(" || token === "[" || token === "{") depth++;
-        if (token === ")" || token === "]" || token === "}") depth--;
-        this.next();
+      } else {
+        // Bare condition
+        let depth = 0;
+        while (this.pos < this.tokens.length) {
+          const token = this.peek();
+          if (token === "{" && depth === 0) break;
+          if (token === "(" || token === "[" || token === "{") depth++;
+          if (token === ")" || token === "]" || token === "}") depth--;
+          this.next();
+        }
+        conditionEnd = this.pos - 1;
       }
-
-      conditionEnd = this.pos - 1;
     }
 
-    if (this.peek() !== "{")
-      throw { message: "Expected '{' after loop", code: ExitCode.SystaxError };
-
+    // Validate loop body start
+    if (this.peek() !== "{") {
+      throw {
+        message: "Expected '{' after loop header",
+        code: ExitCode.SystaxError,
+      };
+    }
     this.next();
 
+    // Parse loop body
     const loopBodyStart = this.pos;
     let depth = 1;
     while (this.pos < this.tokens.length && depth > 0) {
@@ -386,20 +522,13 @@ export class Luz {
     const varsBeforeLoop = new Set(this.vars.keys());
     let finalValue = null;
 
-    // Save original loop variable value if it exists
-    let originalLoopVar: LuzVar | undefined;
-    if (loopVariable) originalLoopVar = this.vars.get(loopVariable);
-
     try {
       if (loopVariable !== null) {
-        // For-in
+        // For-in loop execution
         const elements = this.getIterableElements(iterable);
-
         for (const element of elements) {
           this.vars.set(loopVariable, { value: element });
-
           const varsBeforeIteration = new Set(this.vars.keys());
-
           try {
             this.pos = loopBodyStart;
             while (this.pos < loopBodyEnd) {
@@ -408,12 +537,11 @@ export class Luz {
           } catch (error) {
             if (error instanceof BreakSignal) {
               finalValue = error.value;
-              throw error;
+              break;
             } else if (error instanceof ContinueSignal) {
               continue;
-            } else {
-              throw error;
             }
+            throw error;
           } finally {
             for (const name of Array.from(this.vars.keys())) {
               if (!varsBeforeIteration.has(name) && name !== loopVariable) {
@@ -423,7 +551,7 @@ export class Luz {
           }
         }
       } else if (isWhileLoop) {
-        // While
+        // While loop execution
         while (true) {
           const conditionValue = this.evaluateCondition(
             conditionStart,
@@ -440,36 +568,8 @@ export class Luz {
           } catch (error) {
             if (error instanceof BreakSignal) {
               finalValue = error.value;
-              throw error;
+              break;
             } else if (error instanceof ContinueSignal) {
-              continue;
-            } else {
-              throw error;
-            }
-          } finally {
-            for (const name of Array.from(this.vars.keys())) {
-              if (!varsBeforeIteration.has(name)) {
-                this.vars.delete(name);
-              }
-            }
-          }
-        }
-      } else {
-        // infinite loop
-        while (true) {
-          const varsBeforeIteration = new Set(this.vars.keys());
-
-          try {
-            this.pos = loopBodyStart;
-            while (this.pos < loopBodyEnd) {
-              this.parseStatement();
-            }
-          } catch (error) {
-            if (error instanceof BreakSignal) {
-              finalValue = error.value;
-              throw error;
-            }
-            if (error instanceof ContinueSignal) {
               continue;
             }
             throw error;
@@ -490,20 +590,16 @@ export class Luz {
           this.vars.delete(name);
         }
       }
-
       if (loopVariable) {
-        if (originalLoopVar !== undefined) {
-          this.vars.set(loopVariable, originalLoopVar);
-        } else {
-          this.vars.delete(loopVariable);
-        }
+        this.vars.delete(loopVariable);
       }
-
       this.pos = loopBodyEnd + 1;
     }
 
     return finalValue;
   }
+
+  //!
 
   private tryParseLValue(): { get: () => any; set: (v: any) => void } | null {
     const initialState = { pos: this.pos, vars: new Map(this.vars) };
@@ -565,10 +661,13 @@ export class Luz {
     }
   }
 
-  private getIterableElements(iterable: any): any[] {
-    if (typeof iterable === "string") {
+  private getIterableElements(iterable: any): Iterable<any> {
+    if (iterable instanceof Range || iterable instanceof XRange) 
+      return iterable.__value;
+    
+    if (typeof iterable === "string") 
       return Array.from(iterable);
-    }
+    
 
     if (iterable !== null && typeof iterable === "object") {
       if ("__type" in iterable) {
@@ -666,6 +765,9 @@ export class Luz {
   }
 
   private getType(value: any): (typeof Luz.TYPES)[number] {
+    if (value instanceof Range) return "ran";
+    if (value instanceof XRange) return "xran";
+
     if (typeof value === "object" && value !== null && "__type" in value) {
       return value.__type;
     }
@@ -913,9 +1015,19 @@ export class Luz {
                 code: ExitCode.InvalidInstruction,
               };
             } else if (__type === "vec") {
-              left.__value.push(right);
+              //!left.__value.push(right);
+
+              left = {
+                __type,
+                __value: [...left.__value, right],
+              };
             } else if (__type === "set") {
-              left.__value.add(right);
+              //! left.__value.add(right);
+
+              left = {
+                __type,
+                __value: new Set([...left.__value, right]),
+              };
             }
           } else if (
             typeof right === "object" &&
@@ -963,9 +1075,6 @@ export class Luz {
         const right = this.parseBitwise();
         if (op === "*") left = left * right;
         else if (op === "/" || op === "~/") {
-          // if (right === 0) {
-          //   throw { message: "Division by zero", code: ExitCode.RuntimeError };
-          // }
           left = left / right;
           if (op === "~/") left = Math.floor(left);
         } else left = left % right;
@@ -1012,6 +1121,9 @@ export class Luz {
       return `${value.__type === "vec" ? "!" : ""}[...]`;
     }
 
+    if (value instanceof Range) return `${value.start}..${value.end}`;
+    if (value instanceof XRange) return `${value.start}..=${value.end}`;
+
     if (typeof value === "object" && value !== null && "__type" in value) {
       visited.add(value);
 
@@ -1048,6 +1160,56 @@ export class Luz {
     return String(value);
   }
 
+  private formatValueDebug(value: any, visited: Set<any> = new Set()): string {
+    if (visited.has(value)) {
+      //? Circular reference handling
+      if (value.__type === "set") {
+        return "@{...}";
+      }
+      return `${value.__type === "vec" ? "!" : ""}[...]`;
+    }
+
+    if (value instanceof Range) return `${value.start}..${value.end}`;
+    if (value instanceof XRange) return `${value.start}..=${value.end}`;
+
+    if (typeof value === "object" && value !== null && "__type" in value) {
+      visited.add(value);
+
+      let elements: string[];
+      if (value.__type === "set") {
+        elements = Array.from(value.__value).map((el: any) =>
+          this.formatValueDebug(el, visited)
+        );
+      } else {
+        elements = value.__value.map((el: any) =>
+          this.formatValueDebug(el, visited)
+        );
+      }
+
+      visited.delete(value);
+      switch (value.__type) {
+        case "vec":
+          return `![${elements.join(" ")}]`;
+        case "set":
+          return `@{${elements.join(" ")}}`;
+        default:
+          return `[${elements.join(" ")}]`;
+      }
+    } else if (Array.isArray(value)) {
+      visited.add(value);
+      const elements = value
+        .map((el) => this.formatValueDebug(el, visited))
+        .join(" ");
+      visited.delete(value);
+      return `[${elements}]`;
+    }
+
+    if (typeof value === "number" && !Number.isFinite(value)) return "inf";
+    if (typeof value === "string")
+      return `"${value.replace(/\n/g, "\\n").replace(/\t/g, "\\t")}"`;
+    return String(value);
+  }
+
   private parseAs(): any {
     let left = this.parseUnary();
 
@@ -1060,7 +1222,6 @@ export class Luz {
         if (this.peek() === "typeof") {
           this.next();
 
-          
           const typeReference = this.parsePrimary();
           targetType = this.getType(typeReference);
         } else {
@@ -1072,6 +1233,24 @@ export class Luz {
             message: `Invalid type '${targetType}' for casting`,
             code: ExitCode.SemanticError,
           };
+        }
+
+        if (left instanceof Range || left instanceof XRange) {
+          const values = Array.from(left.__value);
+          switch (targetType) {
+            case "vec":
+              left = { __type: "vec", __value: values };
+              continue;
+            case "arr":
+              left = { __type: "arr", __value: values };
+              continue;
+            case "set":
+              left = { __type: "set", __value: new LuzSet(values) };
+              continue;
+            case "str":
+              left = values.join(" ");
+              break;
+          }
         }
 
         const isStruct =
@@ -1230,7 +1409,15 @@ export class Luz {
 
     if (op === "log" || op === "logln") {
       this.next();
+
+      if (this.peek() === ";") {
+        if (op === "log") process.stdout.write("");
+        else console.log("");
+        return "";
+      }
+
       const rhs = this.parseExpression();
+
       const out = this.formatValue(rhs);
 
       if (op === "log") process.stdout.write(out);
@@ -1297,6 +1484,9 @@ export class Luz {
       this.next();
       const rhs = this.parsePrimary();
 
+      if (rhs instanceof Range || rhs instanceof XRange) return rhs.start;
+      // if (rhs instanceof XRange) return rhs.start;
+
       if (typeof rhs === "object" && rhs !== null && "__value" in rhs) {
         const type: "vec" | "arr" | "set" = rhs.__type;
 
@@ -1318,6 +1508,9 @@ export class Luz {
     } else if (op === "lastof") {
       this.next();
       const rhs = this.parsePrimary();
+
+      if (rhs instanceof XRange) return rhs.end;
+      if (rhs instanceof Range) return rhs.end - Math.sign(rhs.end - rhs.start);
 
       if (typeof rhs === "object" && rhs !== null && "__value" in rhs) {
         const type: "vec" | "arr" | "set" = rhs.__type;
@@ -1617,7 +1810,6 @@ export class Luz {
       this.next();
     }
   }
-
   private parseRange(): any {
     let left = this.parseConditional();
 
@@ -1627,27 +1819,20 @@ export class Luz {
         this.next();
         const right = this.parseConditional();
 
-        if (typeof left !== "number" || typeof right !== "number")
+        if (typeof left !== "number" || typeof right !== "number") {
           throw {
             message: "Range boundaries must be numeric values",
             code: ExitCode.SemanticError,
           };
+        }
 
-        const inclusive = op === "..=";
-
-        const end = inclusive
-          ? right + (Math.sign(right) === 0 ? 1 : Math.sign(right))
-          : right;
-        const rangeArray = this.getRange(left, end);
-
-        //? Wrap into arr
-        left = { __type: "arr", __value: rangeArray };
+        // Create range instances instead of arrays
+        left = op === "..=" ? new XRange(left, right) : new Range(left, right);
       } else break;
     }
 
     return left;
   }
-
   private parseConditional(): any {
     const condition = this.parseLogicalOr();
 
@@ -2027,46 +2212,7 @@ export class Luz {
       const { name, const: isConst, type } = el;
       let valBefore = el.value;
 
-      function unwrapValue(
-        { __value, __type }: { __type: "vec" | "arr" | "set"; __value: any },
-        visited: Set<any> = new Set()
-      ): Array<any> {
-        const res: Array<any> = [];
-
-        if (visited.has(__value)) {
-          res.push(["..."]);
-          return res;
-        }
-
-        visited.add(__value);
-
-        try {
-          const elements = __type === "set" ? __value.values() : __value;
-          for (const el of elements) {
-            if (typeof el === "object" && el !== null && "__value" in el) {
-              res.push(unwrapValue(el, visited)); // Removed the spread operator
-            } else {
-              res.push(el);
-            }
-          }
-          return res;
-        } finally {
-          visited.delete(__value);
-        }
-      }
-
-      if (
-        typeof valBefore === "object" &&
-        valBefore !== null &&
-        "__value" in valBefore &&
-        "__type" in valBefore
-      ) {
-        valBefore = unwrapValue(valBefore);
-      } else if (typeof valBefore === "string")
-        //? Showing \n as \n..., cuz debug
-        valBefore = valBefore.replace(/\r\n?|\n/g, "\\n").replace(/\t/g, "\\t");
-
-      const value = valBefore;
+      const value = this.formatValueDebug(valBefore);
 
       return {
         name,
@@ -2140,15 +2286,6 @@ export class Luz {
 
   private getBooleanToken(token: string): boolean {
     return token === "true";
-  }
-
-  private getRange(start: number, end: number): Array<number> {
-    const arr: Array<number> = [];
-
-    if (start < end) for (let i = start; i < end; i++) arr.push(i);
-    else for (let i = start; i > end; i--) arr.push(i);
-
-    return arr;
   }
 
   private getStrToken(token: string): string {

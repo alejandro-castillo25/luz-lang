@@ -22,6 +22,7 @@ parseExpression
     |> parseRange   // .. ..=
         |> parseConditional   (?:)
             |> parseLogicalOr   // ||
+                |> parseNullish   // ||
                 |> parseLogicalAnd  // &&
                     |> parseEquality() // ==, !=
                         |> parseComparision() // <. >, <=, >=
