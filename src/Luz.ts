@@ -74,6 +74,11 @@ export class XRange {
     let current = this.start;
     const step = Math.sign(this.end - this.start);
 
+    if (this.start === this.end) {
+      yield current;
+      return;
+    }
+
     while (step > 0 ? current <= this.end : current >= this.end) {
       yield current;
       current += step;
@@ -117,6 +122,7 @@ export class Luz {
   private rl = psp({
     sigint: true,
   });
+  private isSkipping: boolean = false;
 
   private pipeStdin: string[] | null = null;
 
@@ -142,7 +148,6 @@ export class Luz {
     "typeof",
     "copyof",
     "sizeof",
-
     "firstof",
     "lastof",
 
@@ -166,12 +171,17 @@ export class Luz {
     "xran",
   ] as const;
 
-  //! the \r is not detected, but WHY
-  public static tokensRegExp: RegExp =
-    /\?\?|<=>|\,|\.\.\=?|\@\{|!\[|\*\*\=?|~\/\=?|<<|>>>?|~|-(?:-|=)|[<>]?\-[<>]?|\+\+|(\d|_)+XL|(?:\d|_)*\.?\d+|(?:#|\/\/).*|\/\*(?:.|\n|\r)*?\*\/|\'(?:.|\n|\r)*?(?<!\\)\'|\"(?:.|\n|\r)*?(?<!\\)\"|\`(?:.|\n|\r)*?(?<!\\)\`|(?:[=!\-\+*<>%\^\?]|\/\/?)\=?|[\$\w]+|\.|\|\||[\(\)\[\]\{\}%\?:]|\&\&|[&|^]|(?<!(?:;|^));/gi;
-
+  //* Original!
   // public static tokensRegExp: RegExp =
-  //   /\.\.\=?|(?:!|@)\[|\*\*\=?|~\/\=?|<<|>>>?|~|-(?:-|=)|[<>]?\-[<>]?|\+\+|(\d|_)+XL|(?:\d|_)*\.?\d+|(?:#|\/\/).*|\/\*(?:[^\r]|\n)*?\*\/|\'(?:[^\r\']|\\.)*?(?<!\\)\'|\"(?:[^\r\"]|\\.)*?(?<!\\)\"|(?:[=!\-\+*<>%\^\?]|\/\/?)\=?|[\$\w]+|\.|\|\||[\(\)\[\]\{\}%\?:]|\&\&|[&|^]|(?<!(?:;|^));/gi;
+  //   /\?\?|<=>|\,|\.\.\=?|\@\{|!\[|\*\*\=?|~\/\=?|<<|>>>?|~|-(?:-|=)|[<>]?\-[<>]?|\+\+|(\d|_)+XL|(?:\d|_)*\.?\d+|(?:#|\/\/).*|\/\*(?:.|\n|\r)*?\*\/|\'(?:.|\n|\r)*?(?<!\\)\'|\"(?:.|\n|\r)*?(?<!\\)\"|\`(?:.|\n|\r)*?(?<!\\)\`|(?:[=!\-\+*<>%\^\?]|\/\/?)\=?|[\$\w]+|\.|\|\||[\(\)\[\]\{\}%\?:]|\&\&|[&|^]|(?<!(?:;|^));/gi;
+
+  //? New one but old
+  // public static tokensRegExp: RegExp =
+  //   /\?\?|<=>|,|\.\.=?|@\{|!\[|\*\*\=?|~\/=?|<<|>>>?|~|-(?:-|=)|[<>]?-[<>]?|\+\+|(\d|_)+XL|(?:\d|_)*\.?\d+|(?:#|\/\/).*|\/\*[\s\S]*?\*\/|'[\s\S]*?(?<!\\)'|"[\s\S]*?(?<!\\)"|`[\s\S]*?(?<!\\)`|[=!\-+*<>%^?/]=?|[\w$]+|\.|\|\||[()\[\]{}%?:]|&&|[&|^]|(?<!(?:;|^));/gi;
+
+  //!
+  public static tokensRegExp: RegExp =
+    /\bbreak\s*\r?\n|(?:\+\+|--)(?:\w|\$)+(?:\[[\s\S]*?\])*|(?:\w|\$)+(?:\[[\s\S]*?\])*(?:\+\+|--)|\?\?|<=>|,|\.\.=?|@\{|!\[|\*\*\=?|~\/=?|<<|>>>?|~|-=|[<>]?-[<>]?|(\d|_)+(?:X|x)(?:L|l)|(?:\d|_)*\.?\d+|(?:#|\/\/).*|\/\*[\s\S]*?\*\/|'[\s\S]*?(?<!\\)'|"[\s\S]*?(?<!\\)"|`[\s\S]*?(?<!\\)`|[=!\-+*<>%^?/]=?|[\w$]+|\.|\|\||[()\[\]{}%?:]|&&|[&|^]|(?<!(?:;|^));/g;
 
   constructor({ vars, expr }: LuzObj) {
     this.vars = vars
@@ -231,6 +241,11 @@ export class Luz {
     return value;
   }
   private parseExpression(): any {
+    if (this.isSkipping) {
+      this.skipExpression();
+      return null;
+    }
+
     if (this.isComment(this.peek())) {
       this.next();
       return;
@@ -244,31 +259,64 @@ export class Luz {
 
   private parseSwap(): any {
     const startPos = this.pos;
-    const left = this.tryParseLValue();
-    if (left) {
-      if (this.peek() === "<=>") {
-        this.next();
-        const right = this.tryParseLValue();
-        if (!right)
-          throw {
-            message: "Right side of swap must be an l-value",
-            code: ExitCode.SystaxError,
-          };
+    const initialState = { vars: new Map(this.vars) };
 
-        const a = left.get();
-        const b = right.get();
-        if (a !== b) {
-          left.set(b);
-          right.set(a);
-          return true;
-        } else {
-          return false;
-        }
-      }
+    try {
+      // Create temporary position tracker
+      let tempPos = startPos;
+
+      // Check left structure
+      const leftEnd = this.checkLValueStructure(tempPos);
+      if (leftEnd === -1) return null;
+      tempPos = leftEnd;
+
+      // Check for <=>
+      if (this.tokens[tempPos] !== "<=>") return null;
+      tempPos++;
+
+      // Check right structure
+      const rightEnd = this.checkLValueStructure(tempPos);
+      if (rightEnd === -1) return null;
+
+      // Now parse for real
+      this.pos = startPos;
+      const left = this.tryParseLValue()!;
+      this.next(); // Consume <=>
+      const right = this.tryParseLValue()!;
+
+      const a = left.get();
+      const b = right.get();
+      left.set(b);
+      right.set(a);
+      return true;
+    } catch (e: any) {
+      this.pos = startPos;
+      this.vars = new Map(initialState.vars);
+      return null;
     }
-    //! Reset pos
-    this.pos = startPos;
-    return null;
+  }
+
+  private checkLValueStructure(startPos: number): number {
+    let pos = startPos;
+    try {
+      if (!this.isVariableToken(this.tokens[pos]!)) return -1;
+      pos++;
+
+      while (this.tokens[pos] === "[") {
+        pos++;
+
+        let depth = 1;
+        while (pos < this.tokens.length && depth > 0) {
+          if (this.tokens[pos] === "[") depth++;
+          if (this.tokens[pos] === "]") depth--;
+          pos++;
+        }
+        if (depth !== 0) return -1;
+      }
+      return pos;
+    } catch {
+      return -1;
+    }
   }
 
   private parseBlock(): any {
@@ -324,7 +372,7 @@ export class Luz {
       }
     }
 
-    // Handle JavaScript types
+    //? Handle JavaScript types
     if (Array.isArray(left)) return left.includes(right);
     if (typeof left === "string") return left.includes(String(right));
     if (left instanceof Set) return left.has(right);
@@ -335,270 +383,209 @@ export class Luz {
     };
   }
 
-  private skipStatementOrBlock(): void {
-    if (this.peek() === "{") {
-      let depth = 0;
-      do {
-        const tok = this.next();
-        if (tok === "{") depth++;
-        else if (tok === "}") depth--;
-      } while (this.pos < this.tokens.length && depth > 0);
-      return;
-    }
 
-    while (this.pos < this.tokens.length) {
-      const t = this.peek();
-
-      if (t === ";") {
-        this.next();
-        break;
-      }
-
-      if (t === "}" || t === "else" || t === "") break;
-
-      this.next();
-    }
-  }
-
-  private evaluateCondition(
-    conditionStart: number,
-    conditionEnd: number
-  ): boolean {
-    const originalPos = this.pos;
-    this.pos = conditionStart;
-    let value;
-    try {
-      value = this.parseExpression();
-      if (this.pos - 1 !== conditionEnd) {
-        throw new Error("Condition parsing did not consume expected tokens");
-      }
-    } finally {
-      this.pos = originalPos;
-    }
-    return Boolean(value);
-  }
+  // private evaluateCondition(
+  //   conditionStart: number,
+  //   conditionEnd: number
+  // ): boolean {
+  //   const originalPos = this.pos;
+  //   this.pos = conditionStart;
+  //   let value;
+  //   try {
+  //     value = this.parseExpression();
+  //     if (this.pos - 1 !== conditionEnd) {
+  //       throw new Error("Condition parsing did not consume expected tokens");
+  //     }
+  //   } finally {
+  //     this.pos = originalPos;
+  //   }
+  //   return Boolean(value);
+  // }
   //!
   private parseLoopExpression(): any {
-    this.next(); // Consume 'loop'
-
-    // Handle infinite loops first
-    if (this.peek() === "{") {
-      this.next(); // Consume '{'
-      const loopBodyStart = this.pos;
-      let depth = 1;
-
-      // Find matching closing brace
-      while (this.pos < this.tokens.length && depth > 0) {
-        const token = this.next();
-        if (token === "{") depth++;
-        if (token === "}") depth--;
-      }
-      const loopBodyEnd = this.pos - 1;
-
-      const varsBeforeLoop = new Set(this.vars.keys());
-      let finalValue = null;
-
-      try {
-        while (true) {
-          const varsBeforeIteration = new Set(this.vars.keys());
-          try {
-            this.pos = loopBodyStart;
-            while (this.pos < loopBodyEnd) {
-              this.parseStatement();
-            }
-          } catch (error) {
-            if (error instanceof BreakSignal) {
-              finalValue = error.value;
-              break;
-            } else if (error instanceof ContinueSignal) {
-              continue;
-            }
-            throw error;
-          } finally {
-            // Clean up variables created in this iteration
-            for (const name of Array.from(this.vars.keys())) {
-              if (!varsBeforeIteration.has(name)) {
-                this.vars.delete(name);
-              }
-            }
-          }
-        }
-      } finally {
-        // Clean up variables created in entire loop
-        for (const name of Array.from(this.vars.keys())) {
-          if (!varsBeforeLoop.has(name)) {
-            this.vars.delete(name);
-          }
-        }
-        this.pos = loopBodyEnd + 1;
-      }
-      return finalValue;
-    }
-
-    // Handle loops with conditions
-    let loopVariable: string | null = null;
-    let iterable: any;
-    let isWhileLoop = false;
-    let conditionStart = -1;
-    let conditionEnd = -1;
-    let hasParen = false;
-
-    // Check for optional parentheses
-    if (this.peek() === "(") {
-      hasParen = true;
-      this.next();
-    }
-
-    // Parse loop header
-    if (this.isVariableToken(this.peek()) && this.peek(1) === "in") {
-      // For-in loop
-      loopVariable = this.next();
-      this.next(); // Consume 'in'
-      iterable = this.parseExpression();
-
-      if (hasParen) {
-        if (this.peek() !== ")") {
-          throw {
-            message: "Expected ')' after for-in expression",
-            code: ExitCode.SystaxError,
-          };
-        }
-        this.next(); // Consume ')'
-      }
-    } else {
-      // While-style loop
-      isWhileLoop = true;
-      conditionStart = this.pos;
-
-      if (hasParen) {
-        // Parenthesized condition
-        let depth = 0;
-        while (this.pos < this.tokens.length) {
-          const token = this.peek();
-          if (token === ")") {
-            if (depth === 0) {
-              conditionEnd = this.pos - 1;
-              this.next(); // Consume ')'
-              break;
-            }
-            depth--;
-          }
-          if (token === "(") depth++;
-          this.next();
-        }
-      } else {
-        // Bare condition
-        let depth = 0;
-        while (this.pos < this.tokens.length) {
-          const token = this.peek();
-          if (token === "{" && depth === 0) break;
-          if (token === "(" || token === "[" || token === "{") depth++;
-          if (token === ")" || token === "]" || token === "}") depth--;
-          this.next();
-        }
-        conditionEnd = this.pos - 1;
-      }
-    }
-
-    // Validate loop body start
-    if (this.peek() !== "{") {
-      throw {
-        message: "Expected '{' after loop header",
-        code: ExitCode.SystaxError,
-      };
-    }
     this.next();
 
-    // Parse loop body
-    const loopBodyStart = this.pos;
+    // * loop inf
+    if (this.peek() === "{") {
+      const result = this.parseInfiniteLoop();
+      return result;
+    }
+
+    // ? Known loop variant
+    const hasParen = this.peek() === "(";
+    if (hasParen) this.next();
+
+    let loopVariable: string | null = null;
+    let iterable: any;
+    let conditionStart: number;
+    let conditionEnd: number;
+
+    //? is loop in
+    if (this.isVariableToken(this.peek()) && this.peek(1) === "in") {
+      loopVariable = this.next();
+      this.next(); // in
+      iterable = this.parseExpression();
+      if (hasParen) this.expect(")", "for-in expression");
+    } else {
+      //* While loop
+      conditionStart = this.pos;
+      let depth = 0;
+      while (this.pos < this.tokens.length) {
+        const token = this.peek();
+        if (hasParen && token === ")" && depth === 0) break;
+        if (!hasParen && token === "{") break;
+        if (["(", "[", "{"].includes(token)) depth++;
+        if ([")", "]", "}"].includes(token)) depth--;
+        this.next();
+      }
+      conditionEnd = this.pos - 1;
+      if (hasParen) this.expect(")", "loop condition");
+    }
+
+    //? body
+    this.expect("{", "loop header");
+    const loopBody = this.parseLoopBody();
+
+    //? Run loop!
+    if (loopVariable !== null) {
+      const result = this.executeForInLoop(loopVariable, iterable, loopBody);
+      this.pos = loopBody.end + 1; //?  } ->
+      return result;
+    } else {
+      const result = this.executeWhileLoop(
+        conditionStart!,
+        conditionEnd!,
+        loopBody
+      );
+      this.pos = loopBody.end + 1; //? getto after }
+      return result;
+    }
+  }
+
+  private parseInfiniteLoop(): any {
+    this.expect("{", "infinite loop body");
+    const loopBody = this.parseLoopBody();
+    let result: any = null;
+
+    while (true) {
+      try {
+        this.pos = loopBody.start;
+        result = this.executeLoopBody(loopBody);
+      } catch (e) {
+        if (e instanceof BreakSignal) {
+          result = e.value;
+          break;
+        }
+        throw e;
+      }
+    }
+
+    this.pos = loopBody.end + 1; //? } ->
+    return result;
+  }
+
+  private parseLoopBody(): { start: number; end: number } {
+    const start = this.pos;
     let depth = 1;
     while (this.pos < this.tokens.length && depth > 0) {
       const token = this.next();
       if (token === "{") depth++;
       if (token === "}") depth--;
     }
-    const loopBodyEnd = this.pos - 1;
 
-    const varsBeforeLoop = new Set(this.vars.keys());
-    let finalValue = null;
-
-    try {
-      if (loopVariable !== null) {
-        // For-in loop execution
-        const elements = this.getIterableElements(iterable);
-        for (const element of elements) {
-          this.vars.set(loopVariable, { value: element });
-          const varsBeforeIteration = new Set(this.vars.keys());
-          try {
-            this.pos = loopBodyStart;
-            while (this.pos < loopBodyEnd) {
-              this.parseStatement();
-            }
-          } catch (error) {
-            if (error instanceof BreakSignal) {
-              finalValue = error.value;
-              break;
-            } else if (error instanceof ContinueSignal) {
-              continue;
-            }
-            throw error;
-          } finally {
-            for (const name of Array.from(this.vars.keys())) {
-              if (!varsBeforeIteration.has(name) && name !== loopVariable) {
-                this.vars.delete(name);
-              }
-            }
-          }
-        }
-      } else if (isWhileLoop) {
-        // While loop execution
-        while (true) {
-          const conditionValue = this.evaluateCondition(
-            conditionStart,
-            conditionEnd
-          );
-          if (!conditionValue) break;
-
-          const varsBeforeIteration = new Set(this.vars.keys());
-          try {
-            this.pos = loopBodyStart;
-            while (this.pos < loopBodyEnd) {
-              this.parseStatement();
-            }
-          } catch (error) {
-            if (error instanceof BreakSignal) {
-              finalValue = error.value;
-              break;
-            } else if (error instanceof ContinueSignal) {
-              continue;
-            }
-            throw error;
-          } finally {
-            for (const name of Array.from(this.vars.keys())) {
-              if (!varsBeforeIteration.has(name)) {
-                this.vars.delete(name);
-              }
-            }
-          }
-        }
-      }
-    } catch (error) {
-      if (!(error instanceof BreakSignal)) throw error;
-    } finally {
-      for (const name of Array.from(this.vars.keys())) {
-        if (!varsBeforeLoop.has(name)) {
-          this.vars.delete(name);
-        }
-      }
-      if (loopVariable) {
-        this.vars.delete(loopVariable);
-      }
-      this.pos = loopBodyEnd + 1;
-    }
-
-    return finalValue;
+    return { start, end: this.pos - 1 };
   }
 
+  private executeForInLoop(
+    variable: string,
+    iterable: any,
+    body: { start: number; end: number }
+  ): any {
+    const elements = this.getIterableElements(iterable);
+    let result: any = null;
+    for (const el of elements) {
+      this.vars.set(variable, { value: el });
+      try {
+        this.executeLoopBody(body);
+      } catch (e) {
+        if (e instanceof BreakSignal) {
+          result = e.value;
+          break;
+        } else if (e instanceof ContinueSignal) {
+          continue;
+        }
+        throw e;
+      }
+    }
+    this.vars.delete(variable);
+    return result;
+  }
+
+  private executeWhileLoop(
+    conditionStart: number,
+    conditionEnd: number,
+    body: { start: number; end: number }
+  ): any {
+    let result: any = null;
+    while (true) {
+      const originalPos = this.pos;
+
+      this.pos = conditionStart;
+      const condition = this.parseExpression();
+
+      //? check: we consumed condition tokens
+      if (this.pos !== conditionEnd + 1) {
+        throw {
+          message: "Condition parsing length mismatch",
+          code: ExitCode.SystaxError,
+        };
+      }
+
+      this.pos = originalPos;
+
+      if (!condition) break;
+
+      try {
+        result = this.executeLoopBody(body);
+      } catch (e) {
+        if (e instanceof BreakSignal) {
+          result = e.value;
+          break;
+        } else if (e instanceof ContinueSignal) {
+          continue;
+        }
+        throw e;
+      }
+    }
+    return result;
+  }
+
+  private executeLoopBody(body: { start: number; end: number }): any {
+    const varsBefore = new Set(this.vars.keys());
+    let result: any = null;
+    this.pos = body.start;
+    try {
+      while (this.pos < body.end) {
+        result = this.parseStatement();
+      }
+    } finally {
+      //? Clean up!
+      Array.from(this.vars.keys())
+        .filter((k) => !varsBefore.has(k))
+        .forEach((k) => this.vars.delete(k));
+    }
+    return result;
+  }
+
+  private expect(token: string, context: string) {
+    if (this.peek() !== token) {
+      throw {
+        message: `Expected '${token}' in ${context}`,
+        code: ExitCode.SystaxError,
+      };
+    }
+    this.next();
+  }
   //!
 
   private tryParseLValue(): { get: () => any; set: (v: any) => void } | null {
@@ -610,7 +597,6 @@ export class Luz {
       if (!this.isVariableToken(this.peek())) return null;
       varName = this.next();
 
-      // Parse indices
       while (this.peek() === "[") {
         this.next();
         const index = this.parseExpression();
@@ -619,13 +605,14 @@ export class Luz {
         this.next();
       }
 
-      // Validate variable exists and is mutable
+      //? Validate variable exists and not const
       if (!this.vars.has(varName))
         throw new Error(`Undefined variable '${varName}'`);
       const varData = this.vars.get(varName)!;
       if (varData.const) throw new Error(`Cannot modify constant '${varName}'`);
 
       return {
+        //? YUH!
         get: () => {
           let value = varData.value;
           for (const indexExpr of indices) {
@@ -662,12 +649,10 @@ export class Luz {
   }
 
   private getIterableElements(iterable: any): Iterable<any> {
-    if (iterable instanceof Range || iterable instanceof XRange) 
+    if (iterable instanceof Range || iterable instanceof XRange)
       return iterable.__value;
-    
-    if (typeof iterable === "string") 
-      return Array.from(iterable);
-    
+
+    if (typeof iterable === "string") return Array.from(iterable);
 
     if (iterable !== null && typeof iterable === "object") {
       if ("__type" in iterable) {
@@ -687,6 +672,11 @@ export class Luz {
   }
 
   private parseBreakStatement(): any {
+    if (/\bbreak\s*\r?\n/g.test(this.peek())) {
+      this.next();
+      throw new BreakSignal(null);
+    }
+
     this.next();
     let value = null;
 
@@ -699,69 +689,73 @@ export class Luz {
   }
 
   private parseIfExpression(): any {
-    this.next();
+    this.next(); //? if
+    const cond = this.parseExpression(); //? Parse the condition
 
-    let cond: any;
-    if (this.peek() === "(") {
-      this.next();
-      cond = this.parseExpression();
-      if (this.peek() !== ")")
+    let thenValue: any = null;
+    let elseValue: any = null;
+
+    if (this.peek() !== "{") {
+      throw {
+        message:
+          "Syntax Error: Expected '{' after 'if' condition to start the branch",
+        code: ExitCode.SystaxError,
+      };
+    }
+    if (cond) {
+      thenValue = this.parseBlock(); 
+    } else {
+      this.skipBlock();
+    }
+
+ 
+    if (this.peek() === "else") {
+      this.next(); //? else
+
+      if (this.peek() !== "{") {
         throw {
-          message: "Expected ')' after if condition",
+          message:
+            "Syntax Error: Expected '{' after 'else' to start the 'else' branch",
           code: ExitCode.SystaxError,
         };
-      this.next();
-    } else {
-      cond = this.parseExpression();
-    }
-
-    let resultVal: any = null;
-
-    const thenTerminators = ["else", "", ";"];
-
-    if (cond) {
-      if (this.peek() === "{") {
-        resultVal = this.parseBlock();
+      }
+      
+      if (cond) {
+        this.skipBlock();
       } else {
-        const varsBeforeThen = new Set(this.vars.keys());
-
-        resultVal = this.executeStatementsUntil(thenTerminators);
-
-        for (const name of Array.from(this.vars.keys())) {
-          if (!varsBeforeThen.has(name)) {
-            this.vars.delete(name);
-          }
-        }
-      }
-
-      if (this.peek() === "else") {
-        this.next();
-
-        this.skipStatementOrBlock();
-      }
-    } else {
-      this.skipStatementOrBlock();
-
-      if (this.peek() === "else") {
-        this.next();
-
-        const elseTerminators = [""];
-
-        if (this.peek() === "{") {
-          resultVal = this.parseBlock();
-        } else {
-          const varsBeforeElse = new Set(this.vars.keys());
-          resultVal = this.executeStatementsUntil(elseTerminators);
-
-          for (const name of Array.from(this.vars.keys()))
-            if (!varsBeforeElse.has(name)) {
-              this.vars.delete(name);
-            }
-        }
+        elseValue = this.parseBlock();
       }
     }
 
-    return resultVal;
+    return cond ? thenValue : elseValue;
+  }
+
+
+
+  private skipBlock(): void {
+    let depth = 1;
+    this.next(); // Consume '{'
+    while (this.pos < this.tokens.length && depth > 0) {
+      const token = this.next();
+      if (token === "{") depth++;
+      if (token === "}") depth--;
+    }
+  }
+
+  private skipExpression(): void {
+    let depth = 0;
+    while (this.pos < this.tokens.length) {
+      const token = this.peek();
+      if (
+        depth === 0 &&
+        (token === "else" ||
+          ["}", "]", ")", ";", ",", "=>", "then", "do"].includes(token))
+      )
+        break;
+      this.next();
+      if (["(", "[", "{"].includes(token)) depth++;
+      if ([")", "]", "}"].includes(token)) depth--;
+    }
   }
 
   private getType(value: any): (typeof Luz.TYPES)[number] {
@@ -853,7 +847,6 @@ export class Luz {
       this.pos = initialState.pos;
       this.vars = new Map(initialState.vars);
       return this.parseRange();
-      // return this.parseConditional();
     }
 
     const op = this.next();
@@ -943,7 +936,32 @@ export class Luz {
           }
           break;
         case "-=":
-          result = current - rhs;
+          if (this.getType(current) === "vec") {
+            const valueToRemove = rhs;
+            const vecValues = current.__value;
+            if (
+              vecValues.length > 0 &&
+              vecValues[vecValues.length - 1] === valueToRemove
+            ) {
+              vecValues.pop();
+            } else {
+              let i = vecValues.length - 1;
+              while (i >= 0) {
+                if (vecValues[i] === valueToRemove) {
+                  vecValues.splice(i, 1);
+                }
+                i--;
+              }
+            }
+            result = current;
+          } else if (this.getType(current) === "arr") {
+            throw {
+              message: "Cannot subtract from 'arr', use 'vec' instead",
+              code: ExitCode.InvalidInstruction,
+            };
+          } else {
+            result = current - rhs;
+          }
           break;
         case "*=":
           result = current * rhs;
@@ -1055,7 +1073,40 @@ export class Luz {
             }
           } else left = left + right;
         } else {
-          left = left - right;
+          const leftType = this.getType(left);
+          const rightType = this.getType(right);
+
+          // Check for array or vector in subtraction
+          if (
+            leftType === "vec" ||
+            rightType === "vec" ||
+            leftType === "arr" ||
+            rightType === "arr"
+          ) {
+            if (leftType === "arr" || rightType === "arr") {
+              throw {
+                message: "Subtraction not allowed for 'arr', use 'vec' instead",
+                code: ExitCode.InvalidInstruction,
+              };
+            }
+
+            let vector = leftType === "vec" ? left : right;
+            const valueToRemove = leftType === "vec" ? right : left;
+
+            const newValues = [...vector.__value];
+            let i = newValues.length - 1;
+            while (i >= 0) {
+              if (newValues[i] === valueToRemove) {
+                newValues.splice(i, 1);
+                break;
+              }
+              i--;
+            }
+
+            left = { __type: "vec", __value: newValues };
+          } else {
+            left = left - right;
+          }
         }
       } else {
         break;
@@ -1205,6 +1256,7 @@ export class Luz {
     }
 
     if (typeof value === "number" && !Number.isFinite(value)) return "inf";
+    if (typeof value === "bigint") return `${value}xl`;
     if (typeof value === "string")
       return `"${value.replace(/\n/g, "\\n").replace(/\t/g, "\\t")}"`;
     return String(value);
@@ -1250,6 +1302,18 @@ export class Luz {
             case "str":
               left = values.join(" ");
               break;
+            case "ran":
+              if (left instanceof XRange) {
+                const adj = left.start <= left.end ? 1 : -1;
+                left = new Range(left.start, left.end + adj);
+              }
+              continue;
+            case "xran":
+              if (left instanceof Range) {
+                const adj = left.start < left.end ? -1 : 1;
+                left = new XRange(left.start, left.end + adj);
+              }
+              continue;
           }
         }
 
@@ -1274,16 +1338,66 @@ export class Luz {
           case "bool":
             castedValue = Boolean(valueToCast);
             break;
+          case "maybe":
+            if (left instanceof Range || left instanceof XRange) {
+              const start = left.start;
+              const end = left.end;
+              if (left instanceof Range) {
+                castedValue = start + Math.floor(Math.random() * (end - start));
+              } else {
+                castedValue =
+                  start + Math.floor(Math.random() * (end - start + 1));
+              }
+            } else if (typeof left === "string") {
+              if (left.length === 0) {
+                castedValue = null;
+              } else {
+                const randomIndex = Math.floor(Math.random() * left.length);
+                castedValue = left[randomIndex];
+              }
+            } else if (left && typeof left === "object" && "__type" in left) {
+              const type = left.__type;
+              const value = left.__value;
+              switch (type) {
+                case "arr":
+                case "vec":
+                  if (value.length === 0) {
+                    castedValue = null;
+                  } else {
+                    const randomIndex = Math.floor(
+                      Math.random() * value.length
+                    );
+                    castedValue = value[randomIndex];
+                  }
+                  break;
+                case "set":
+                  const elements = Array.from(value);
+                  if (elements.length === 0) {
+                    castedValue = null;
+                  } else {
+                    const randomIndex = Math.floor(
+                      Math.random() * elements.length
+                    );
+                    castedValue = elements[randomIndex];
+                  }
+                  break;
+                default:
+                  castedValue = Math.random() > 0.5;
+              }
+            } else {
+              castedValue = Math.random() > 0.5;
+            }
+            break;
           case "arr":
             castedValue = Array.isArray(valueToCast)
               ? valueToCast
-              : [valueToCast];
+              : Array.from(valueToCast);
             left = { __type: "arr", __value: castedValue };
             continue;
           case "vec":
             castedValue = Array.isArray(valueToCast)
               ? valueToCast
-              : [valueToCast];
+              : Array.from(valueToCast);
             left = { __type: "vec", __value: castedValue };
             continue;
           case "set":
@@ -1298,9 +1412,7 @@ export class Luz {
         }
 
         left = castedValue;
-      } else {
-        break;
-      }
+      } else break;
     }
 
     return left;
@@ -1366,26 +1478,58 @@ export class Luz {
   }
 
   private parseUnary(): any {
-    const pfx = this.peek();
-    if (pfx === "++" || pfx === "--") {
+    const currentToken = this.peek();
+
+    // Handle prefix operators (++var, --var)
+    if (currentToken.startsWith("++") || currentToken.startsWith("--")) {
+      const operator = currentToken.slice(0, 2);
+      const variablePart = currentToken.slice(2);
+
+      // Save current state
+      const originalTokens = this.tokens;
+      const originalPos = this.pos;
+
+      // Tokenize variablePart
+      const newTokens = variablePart.match(Luz.tokensRegExp) || [];
+      // Replace tokens and reset pos
+      this.tokens = newTokens;
+      this.pos = 0;
+
+      // Parse the variablePart as an l-value
+      const lValue = this.tryParseLValue();
+
+      // Restore original state
+      this.tokens = originalTokens;
+      this.pos = originalPos;
+
+      if (!lValue) {
+        throw {
+          message: `Cannot apply unary '${operator}' to non-l-value '${variablePart}'`,
+          code: ExitCode.SemanticError,
+        };
+      }
+
+      // Get current value
+      const current = lValue.get();
+
+      // Check type
+      if (typeof current !== "number" && typeof current !== "bigint") {
+        throw {
+          message: `Cannot apply unary '${operator}' to non-numeric variable`,
+          code: ExitCode.SemanticError,
+        };
+      }
+
+      // Update value
+      const newValue =
+        operator === "++" ? (current as number) + 1 : (current as number) - 1;
+      lValue.set(newValue);
+
+      // Consume the current token (prefix operator)
       this.next();
-      const varTok = this.next();
-      if (!this.isVariableToken(varTok) || !this.vars.has(varTok)) {
-        throw {
-          message: `Cannot apply unary '${pfx}' to non-variable '${varTok}'`,
-          code: ExitCode.SemanticError,
-        };
-      }
-      const cur = this.vars.get(varTok).value as number;
-      if (typeof cur !== "number") {
-        throw {
-          message: `Cannot apply unary '${pfx}' to non-numeric variable '${varTok}'`,
-          code: ExitCode.SemanticError,
-        };
-      }
-      const updated = pfx === "++" ? cur + 1 : cur - 1;
-      this.vars.get(varTok).value = updated;
-      return updated;
+
+      // Return new value (prefix)
+      return newValue;
     }
 
     const op = this.peek();
@@ -1757,19 +1901,6 @@ export class Luz {
     return left;
   }
 
-  private executeStatementsUntil(terminators: string[]): any {
-    let lastVal: any = null;
-    while (this.pos < this.tokens.length) {
-      const currentToken = this.peek();
-
-      if (terminators.includes(currentToken)) break;
-
-      if (currentToken === "}") break;
-
-      lastVal = this.parseStatement();
-    }
-    return lastVal;
-  }
   private parseEquality(): any {
     let left = this.parseComparison();
 
@@ -1793,31 +1924,14 @@ export class Luz {
     return left;
   }
 
-  private skipUntil(terminators: string[]): void {
-    let depth = 0;
-    while (this.pos < this.tokens.length) {
-      const t = this.peek();
-
-      if (depth === 0 && terminators.includes(t)) break;
-
-      if (t === "(" || t === "[" || t === "{") depth++;
-      else if (t === ")" || t === "]" || t === "}") {
-        depth--;
-
-        if (depth < 0) break;
-      }
-
-      this.next();
-    }
-  }
   private parseRange(): any {
-    let left = this.parseConditional();
+    let left = this.parseLogicalOr();
 
     while (true) {
       const op = this.peek();
       if (op === ".." || op === "..=") {
         this.next();
-        const right = this.parseConditional();
+        const right = this.parseLogicalOr();
 
         if (typeof left !== "number" || typeof right !== "number") {
           throw {
@@ -1833,41 +1947,7 @@ export class Luz {
 
     return left;
   }
-  private parseConditional(): any {
-    const condition = this.parseLogicalOr();
 
-    if (this.peek() !== "?") return condition;
-
-    this.next();
-
-    if (condition) {
-      const trueVal = this.parseAssignment();
-
-      if (this.peek() === ":") {
-        this.next();
-
-        this.skipUntil([")", ";", ""]);
-      } else
-        throw {
-          message: `Expected ':' in conditional expression`,
-          code: ExitCode.SystaxError,
-        };
-
-      return trueVal;
-    } else {
-      this.skipUntil([":"]);
-
-      if (this.peek() !== ":")
-        throw {
-          message: `Expected ':' but found '${this.peek()}'`,
-          code: ExitCode.SystaxError,
-        };
-
-      this.next();
-
-      return this.parseAssignment();
-    }
-  }
 
   private parseArrLiteral(): any[] {
     const elements: any[] = [];
@@ -1877,42 +1957,104 @@ export class Luz {
       return elements;
     }
 
-    const firstElement = this.parseExpression();
+    const savedPos = this.pos;
+    let hasSemicolon = false;
+    let depth = 0;
 
-    if (this.peek() === ";") {
-      this.next();
+    while (this.pos < this.tokens.length) {
+      const token = this.tokens[this.pos];
+      if (token === ";") {
+        if (depth === 0) {
+          hasSemicolon = true;
+          break;
+        }
+      } else if (token === "[") {
+        depth++;
+      } else if (token === "]") {
+        depth--;
+        if (depth < 0) break;
+      }
+      this.pos++;
+    }
 
+    this.pos = savedPos;
+
+    if (hasSemicolon) {
+      const exprStart = this.pos;
+
+      let exprEnd = -1;
+      depth = 0;
+      while (this.pos < this.tokens.length) {
+        const token = this.tokens[this.pos]!;
+        if (token === ";") {
+          if (depth === 0) {
+            exprEnd = this.pos;
+            break;
+          }
+        } else if (["[", "(", "{"].includes(token)) {
+          depth++;
+        } else if ([")", "]", "}"].includes(token)) {
+          depth--;
+        }
+        this.pos++;
+      }
+
+      if (exprEnd === -1) {
+        throw {
+          message: "Expected ';' in arr literal",
+          code: ExitCode.SystaxError,
+        };
+      }
+
+      this.pos = exprEnd + 1;
       const lengthExpr = this.parseExpression();
+
       const length = Number(lengthExpr);
 
-      if (isNaN(length) || length < 0 || !Number.isInteger(length)) {
+      if (
+        lengthExpr === null ||
+        Number.isNaN(length) ||
+        length < 0 ||
+        !Number.isInteger(length)
+      ) {
         throw {
-          message: `Invalid array length '${lengthExpr}'`,
+          message: `Invalid 'arr' length '${lengthExpr}'`,
           code: ExitCode.SemanticError,
         };
       }
 
-      elements.push(...Array(length).fill(firstElement));
+      const postLengthPos = this.pos;
 
-      if (this.peek() !== "]") {
-        throw {
-          message: "Expected ']' after array length",
-          code: ExitCode.SystaxError,
-        };
+      for (let i = 0; i < length; i++) {
+        this.pos = exprStart;
+        const element = this.parseExpression();
+        if (this.pos !== exprEnd) {
+          throw {
+            message: "Element expression parsing mismatch",
+            code: ExitCode.SystaxError,
+          };
+        }
+        elements.push(element);
       }
-      this.next();
 
-      return elements;
+      this.pos = postLengthPos;
     } else {
-      elements.push(firstElement);
       while (this.peek() !== "]") {
         if (this.peek() === ",") this.next();
         const element = this.parseExpression();
         elements.push(element);
       }
-      this.next();
-      return elements;
     }
+
+    if (this.peek() !== "]") {
+      throw {
+        message: "Expected ']' after arr elements",
+        code: ExitCode.SystaxError,
+      };
+    }
+    this.next();
+
+    return elements;
   }
 
   private parseSetLiteral(): LuzSet<any> {
@@ -1943,43 +2085,104 @@ export class Luz {
       return elements;
     }
 
-    const firstElement = this.parseExpression();
+    const savedPos = this.pos;
+    let hasSemicolon = false;
+    let depth = 0;
 
-    if (this.peek() === ";") {
-      this.next();
+    while (this.pos < this.tokens.length) {
+      const token = this.tokens[this.pos];
+      if (token === ";") {
+        if (depth === 0) {
+          hasSemicolon = true;
+          break;
+        }
+      } else if (token === "[") {
+        depth++;
+      } else if (token === "]") {
+        depth--;
+        if (depth < 0) break;
+      }
+      this.pos++;
+    }
 
+    this.pos = savedPos;
+
+    if (hasSemicolon) {
+      const exprStart = this.pos;
+
+      let exprEnd = -1;
+      depth = 0;
+      while (this.pos < this.tokens.length) {
+        const token = this.tokens[this.pos]!;
+        if (token === ";") {
+          if (depth === 0) {
+            exprEnd = this.pos;
+            break;
+          }
+        } else if (["[", "(", "{"].includes(token)) {
+          depth++;
+        } else if ([")", "]", "}"].includes(token)) {
+          depth--;
+        }
+        this.pos++;
+      }
+
+      if (exprEnd === -1) {
+        throw {
+          message: "Expected ';' in vec literal",
+          code: ExitCode.SystaxError,
+        };
+      }
+
+      this.pos = exprEnd + 1;
       const lengthExpr = this.parseExpression();
+
       const length = Number(lengthExpr);
 
-      if (isNaN(length) || length < 0 || !Number.isInteger(length)) {
+      if (
+        lengthExpr === null ||
+        Number.isNaN(length) ||
+        length < 0 ||
+        !Number.isInteger(length)
+      ) {
         throw {
-          message: `Invalid vector length '${lengthExpr}'`,
+          message: `Invalid vec length '${lengthExpr}'`,
           code: ExitCode.SemanticError,
         };
       }
 
-      elements.push(...Array(length).fill(firstElement));
+      const postLengthPos = this.pos;
 
-      if (this.peek() !== "]") {
-        throw {
-          message: "Expected ']' after vector length",
-          code: ExitCode.SystaxError,
-        };
+      for (let i = 0; i < length; i++) {
+        this.pos = exprStart;
+        const element = this.parseExpression();
+        if (this.pos !== exprEnd) {
+          throw {
+            message: "Element expression parsing mismatch",
+            code: ExitCode.SystaxError,
+          };
+        }
+        elements.push(element);
       }
-      this.next();
 
-      return elements;
+      this.pos = postLengthPos;
     } else {
-      elements.push(firstElement);
       while (this.peek() !== "]") {
-        if (this.peek() === ",") this.next();
-
+        if (this.peek() === ",") this.next(); 
         const element = this.parseExpression();
         elements.push(element);
       }
-      this.next();
-      return elements;
     }
+
+    if (this.peek() !== "]") {
+      throw {
+        message: "Expected ']' after vector elements",
+        code: ExitCode.SystaxError,
+      };
+    }
+    this.next();
+
+    return elements;
   }
 
   private parseContinueStatement(): any {
@@ -1994,7 +2197,7 @@ export class Luz {
     if (this.peek() === "if") return this.parseIfExpression();
 
     if (this.peek() === "loop") return this.parseLoopExpression();
-    if (this.peek() === "break") return this.parseBreakStatement();
+    if (this.peek().startsWith("break")) return this.parseBreakStatement();
     if (this.peek() === "continue") return this.parseContinueStatement();
 
     const nextTok = this.peek();
@@ -2052,21 +2255,74 @@ export class Luz {
 
     if (this.isMaybeToken(tok)) return Math.random() > 0.5;
 
-    if (this.isVariableToken(tok)) {
-      if (!this.vars.has(tok)) {
-        throw {
-          message: `Variable '${tok}' is not defined`,
-          code: ExitCode.SemanticError,
-        };
+    if (this.isVariableToken(tok) || tok.endsWith("++") || tok.endsWith("--")) {
+      let operator = "";
+      let variablePart = tok;
+
+      // Check for postfix operators (var++, var--)
+      if (variablePart.endsWith("++") || variablePart.endsWith("--")) {
+        operator = variablePart.slice(-2);
+        variablePart = variablePart.slice(0, -2);
       }
 
-      let value = this.vars.get(tok).value;
-      while (this.peek() === "[") {
-        value = this.parseIndexAccess(value);
+      if (operator) {
+        // Save current state
+        const originalTokens = this.tokens;
+        const originalPos = this.pos;
+
+        // Tokenize variablePart
+        const newTokens = variablePart.match(Luz.tokensRegExp) || [];
+        this.tokens = newTokens;
+        this.pos = 0;
+
+        // Parse the variablePart as an l-value
+        const lValue = this.tryParseLValue();
+
+        // Restore original state
+        this.tokens = originalTokens;
+        this.pos = originalPos;
+
+        if (!lValue) {
+          throw {
+            message: `Cannot apply postfix '${operator}' to non-l-value '${variablePart}'`,
+            code: ExitCode.SemanticError,
+          };
+        }
+
+        // Get current value
+        const current = lValue.get();
+
+        // Check type
+        if (typeof current !== "number" && typeof current !== "bigint") {
+          throw {
+            message: `Cannot apply postfix '${operator}' to non-numeric variable`,
+            code: ExitCode.SemanticError,
+          };
+        }
+
+        // Update value
+        const newValue =
+          operator === "++" ? (current as number) + 1 : (current as number) - 1;
+        lValue.set(newValue);
+
+        // Return original value (postfix)
+        return current;
+      } else {
+        // Existing variable handling...
+        if (!this.vars.has(tok)) {
+          throw {
+            message: `Variable '${tok}' is not defined`,
+            code: ExitCode.SemanticError,
+          };
+        }
+
+        let value = this.vars.get(tok).value;
+        while (this.peek() === "[") {
+          value = this.parseIndexAccess(value);
+        }
+        return value;
       }
-      return value;
     }
-
     throw { message: `Unexpected token '${tok}'`, code: ExitCode.SystaxError };
   }
 
@@ -2134,52 +2390,82 @@ export class Luz {
     this.next();
     const indexExpr = this.parseExpression();
 
-    //! console.log("huh: ",this.peek());
-
     if (this.peek() !== "]")
       throw { message: "Expected ']' after index", code: ExitCode.SystaxError };
-
     this.next();
 
-    if (typeof container === "string") {
-      const idx = this.evalIndex(indexExpr, container);
-      if (idx < 0 || idx >= container.length) {
-        return null;
-      }
-      return container.charAt(idx);
-    }
+    // Handle range-based indexing
+    if (indexExpr instanceof Range || indexExpr instanceof XRange) {
+      const indices = Array.from(indexExpr.__value);
+      let elements = [];
 
-    if (
-      !container ||
-      typeof container !== "object" ||
-      !("__type" in container) ||
-      (container.__type !== "arr" && container.__type !== "vec")
-    )
-      throw {
-        message: "Cannot index non-array/vector",
-        code: ExitCode.SemanticError,
+      const getElement = (idx: number) => {
+        if (typeof container === "string") {
+          idx = idx < 0 ? container.length + idx : idx;
+          return idx >= 0 && idx < container.length
+            ? container.charAt(idx)
+            : null;
+        }
+
+        const values = container?.__value || container;
+        idx = idx < 0 ? values.length + idx : idx;
+        return idx >= 0 && idx < values.length ? values[idx] : null;
       };
 
-    const idx = this.evalIndex(indexExpr, container);
-    return container.__value[idx] ?? null;
-  }
+      for (const idx of indices) {
+        elements.push(getElement(Number(idx)));
+      }
 
-  private evalIndex(indexExpr: any, _container: any): number {
-    const indexValue =
-      typeof indexExpr === "object" && "__value" in indexExpr
-        ? indexExpr.__value
-        : indexExpr;
+      // Return appropriate type
+      if (typeof container === "string") {
+        return elements.join("");
+      }
+      if (container?.__type) {
+        return {
+          __type: container.__type,
+          __value: container.__type === "set" ? new LuzSet(elements) : elements,
+        };
+      }
+      return elements;
+    }
+
+    // Handle single index access
+    const idx = this.evalIndex(indexExpr, container);
+
+    if (typeof container === "string") {
+      return idx >= 0 && idx < container.length ? container.charAt(idx) : null;
+    }
+
+    const values = container?.__value || container;
+    return values[idx] ?? null;
+  }
+  private evalIndex(indexExpr: any, container: any): number {
+    let indexValue = indexExpr;
+
+    if (indexExpr instanceof Range || indexExpr instanceof XRange) {
+      throw {
+        message: "Range indices must be used directly in brackets",
+        code: ExitCode.SemanticError,
+      };
+    }
+
+    if (typeof indexExpr === "object" && "__value" in indexExpr) {
+      indexValue = indexExpr.__value;
+    }
 
     if (typeof indexValue !== "number" && typeof indexValue !== "bigint") {
       throw { message: "Index must be numeric", code: ExitCode.SemanticError };
     }
 
-    const idx = Number(indexValue);
-    // if (idx < 0 || idx >= container.__value.length) {
-    //   throw { message: "Index out of bounds", code: ExitCode.RuntimeError };
-    // }
+    let idx = Number(indexValue);
+    const length =
+      typeof container === "string"
+        ? container.length
+        : container?.__value?.length || container.length;
 
-    return idx;
+    // Handle negative indices
+    if (idx < 0) idx += length;
+    return Math.max(0, Math.min(idx, length - 1));
   }
 
   private peek(offset: number = 0): string {

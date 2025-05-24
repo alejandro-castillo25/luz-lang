@@ -20,9 +20,8 @@ This project was created using `bun init` in bun v1.2.9. [Bun](https://bun.sh) i
 parseExpression
 |> parseAssignment // =, +=, ...
     |> parseRange   // .. ..=
-        |> parseConditional   (?:)
-            |> parseLogicalOr   // ||
-                |> parseNullish   // ||
+        |> parseLogicalOr   // ||
+            |> parseNullish   // ||
                 |> parseLogicalAnd  // &&
                     |> parseEquality() // ==, !=
                         |> parseComparision() // <. >, <=, >=

@@ -17,9 +17,8 @@ console.log(
 const code = luz.run();
 
 console.log(`\n\n${"─".repeat(50)}\n\n`);
-console.log("Exit with Code:", code, "\n");
+console.log("Exit with Code:", code);
 console.timeEnd("Runtime");
-console.log("\n\n");
 
 luz.getVars.length !== 0 && console.table(luz.getVarsDebug);
 
