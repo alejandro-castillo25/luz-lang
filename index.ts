@@ -5,7 +5,8 @@ const name = "main.luz";
 let expr = fs.readFileSync(`./${name}`, "utf8");
 const luz = new Luz({
   expr,
-});
+  }
+);
 
 console.time("Runtime");
 console.log(`┌${"─".repeat(name.length + 2)}┐`);

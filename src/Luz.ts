@@ -4,6 +4,7 @@ import fs from "fs";
 export interface LuzConfig {
   vars?: Record<string, any>;
   expr: string;
+  clearVarsOnEnd?: boolean;
 }
 
 interface LuzVar {
@@ -25,17 +26,25 @@ export class LuzSet<T> extends Set<T> {
   constructor(val?: any) {
     if (Array.isArray(val)) {
       super(val);
-
       this._last = val[val.length - 1];
       return;
     }
-
     super(val);
   }
+
   add(value: T): this {
     super.add(value);
     this._last = value;
     return this;
+  }
+
+  delete(value: T): boolean {
+    const deleted = super.delete(value);
+    if (deleted && value === this._last) {
+      const elements = Array.from(this);
+      this._last = elements.length ? elements[elements.length - 1] : undefined;
+    }
+    return deleted;
   }
 
   get last() {
@@ -43,8 +52,8 @@ export class LuzSet<T> extends Set<T> {
   }
 }
 
-export class Range {
-  readonly __type = "ran";
+export class XRange {
+  readonly __type = "xran";
   constructor(public start: number, public end: number) {}
 
   get __value() {
@@ -62,8 +71,8 @@ export class Range {
   }
 }
 
-export class XRange {
-  readonly __type = "xran";
+export class Range {
+  readonly __type = "ran";
   constructor(public start: number, public end: number) {}
 
   get __value() {
@@ -125,6 +134,10 @@ export class Luz {
   });
   private isSkipping: boolean = false;
 
+  private clearVarsOnEnd: boolean = false;
+
+  // private isBrowserEnvironment = "window" in globalThis && !("process" in globalThis);
+
   private pipeStdin: string[] | null = null;
 
   public static KEYWORDS = [
@@ -180,11 +193,13 @@ export class Luz {
   // public static tokensRegExp: RegExp =
   //   /\?\?|<=>|,|\.\.=?|@\{|!\[|\*\*\=?|~\/=?|<<|>>>?|~|-(?:-|=)|[<>]?-[<>]?|\+\+|(\d|_)+XL|(?:\d|_)*\.?\d+|(?:#|\/\/).*|\/\*[\s\S]*?\*\/|'[\s\S]*?(?<!\\)'|"[\s\S]*?(?<!\\)"|`[\s\S]*?(?<!\\)`|[=!\-+*<>%^?/]=?|[\w$]+|\.|\|\||[()\[\]{}%?:]|&&|[&|^]|(?<!(?:;|^));/gi;
 
-  //!
+  //? Emojis: (\u00a9|\u00ae|[\u2000-\u3300]|\ud83c[\ud000-\udfff]|\ud83d[\ud000-\udfff]|\ud83e[\ud000-\udfff])
+  //! (?<=[\w\$\]])\.)
   public static tokensRegExp: RegExp =
-    /\bbreak\s*\r?\n|(?:\+\+|--)(?:\w|\$)+(?:\[[\s\S]*?\])*|(?:\w|\$)+(?:\[[\s\S]*?\])*(?:\+\+|--)|\?\?|<=>|,|\.\.=?|@\{|!\[|\*\*\=?|~\/=?|<<|>>>?|~|-=|[<>]?-[<>]?|(\d|_)+(?:X|x)(?:L|l)|(?:\d|_)*\.?\d+|(?:#|\/\/).*|\/\*[\s\S]*?\*\/|'[\s\S]*?(?<!\\)'|"[\s\S]*?(?<!\\)"|`[\s\S]*?(?<!\\)`|[=!\-+*<>%^?/]=?|[\w$]+|\.|\|\||[()\[\]{}%?:]|&&|[&|^]|(?<!(?:;|^));/g;
+    /(?:\+\+|--)[\w\$áéíóúüñÁÉÍÓÚÜÑ]+(?:\[[^\]]*?\]|\.[\w\$áéíóúüñÁÉÍÓÚÜÑ]+)*|[\w\$áéíóúüñÁÉÍÓÚÜÑ]+(?:\[[^\]]*?\]|\.[\w\$áéíóúüñÁÉÍÓÚÜÑ]+)*(?:\+\+|--)|\?\?|<=>|,|\.\.=?|@\{|!\[|\*\*\=?|~\/=?|<<|>>>?|~|-=|[<>]?-[<>]?|(?:\d|_)+[Xx][Ll]|(?<![\w\$áéíóúüñÁÉÍÓÚÜÑ]\.?)(?:\d(?:[\d_]*\.[\d_]*(?:e[-+]?\d+)?|\d*[\d_]*(?:e[-+]?\d+)?)|(?:\.[\d_]+(?:e[-+]?\d+)?))|(?:#|\/\/).*|\/\*[\s\S]*?\*\/|'[\s\S]*?(?<!\\)'|"[\s\S]*?(?<!\\)"|`[\s\S]*?(?<!\\)`|[=!\-+*<>%^?/]=?|[\w\$áéíóúüñÁÉÍÓÚÜÑ]+|\.|\|\||[()\[\]{}%?:]|&&|[&|^]|(?<!(?:;|^));/g;
 
-  constructor({ vars, expr }: LuzConfig) {
+  //*   /(?:\+\+|--)[\w\$áéíóúüñÁÉÍÓÚÜÑ]+(?:\[[^\]]*?\]|\.[\w\$áéíóúüñÁÉÍÓÚÜÑ]+)*|[\w\$áéíóúüñÁÉÍÓÚÜÑ]+(?:\[[^\]]*?\]|\.[\w\$áéíóúüñÁÉÍÓÚÜÑ]+)*(?:\+\+|--)|\?\?|<=>|,|\.\.=?|@\{|!\[|\*\*\=?|~\/=?|<<|>>>?|~|-=|[<>]?-[<>]?|(?:\d|_)+[Xx][Ll]|(?<![\w\$áéíóúüñÁÉÍÓÚÜÑ]\.?)(?=.*\d)(?:\d|_|e)*-?\.?(?:\d|_|e)+-?(?:\d|_)*|(?:#|\/\/).*|\/\*[\s\S]*?\*\/|'[\s\S]*?(?<!\\)'|"[\s\S]*?(?<!\\)"|`[\s\S]*?(?<!\\)`|[=!\-+*<>%^?/]=?|[\w\$áéíóúüñÁÉÍÓÚÜÑ]+|\.|\|\||[()\[\]{}%?:]|&&|[&|^]|(?<!(?:;|^));/g;
+  constructor({ vars, expr, clearVarsOnEnd = false }: LuzConfig) {
     this.vars = vars
       ? new Map(
           Object.entries(vars).map((el: [string, LuzVar]) => {
@@ -204,6 +219,7 @@ export class Luz {
       : new Map();
 
     // this.expr = expr.replace(/\r/g, "");
+    this.clearVarsOnEnd = clearVarsOnEnd;
     this.expr = expr;
     this.pipeStdin =
       process.stdin.isTTY === true
@@ -227,6 +243,8 @@ export class Luz {
       }
       console.error(err.message);
       return err.code ?? ExitCode.RuntimeError;
+    } finally {
+      if (this.clearVarsOnEnd) this.clearVars();
     }
   }
 
@@ -263,26 +281,22 @@ export class Luz {
     const initialState = { vars: new Map(this.vars) };
 
     try {
-      // Create temporary position tracker
       let tempPos = startPos;
 
-      // Check left structure
       const leftEnd = this.checkLValueStructure(tempPos);
       if (leftEnd === -1) return null;
       tempPos = leftEnd;
 
-      // Check for <=>
       if (this.tokens[tempPos] !== "<=>") return null;
       tempPos++;
 
-      // Check right structure
       const rightEnd = this.checkLValueStructure(tempPos);
       if (rightEnd === -1) return null;
 
-      // Now parse for real
+      // Now parse for real >:[
       this.pos = startPos;
       const left = this.tryParseLValue()!;
-      this.next(); // Consume <=>
+      this.next();
       const right = this.tryParseLValue()!;
 
       const a = left.get();
@@ -293,6 +307,11 @@ export class Luz {
     } catch (e: any) {
       this.pos = startPos;
       this.vars = new Map(initialState.vars);
+
+      if (e.code === ExitCode.SemanticError) {
+        throw e;
+      }
+
       return null;
     }
   }
@@ -348,14 +367,14 @@ export class Luz {
   private checkHas(left: any, right: any): boolean {
     if (left === null || left === undefined) return false;
 
-    if (left instanceof Range || left instanceof XRange) {
+    if (left instanceof XRange || left instanceof Range) {
       if (typeof right !== "number") return false;
       return left.__type === "ran"
         ? right >= left.start && right < left.end
         : right >= left.start && right <= left.end;
     }
 
-    // Handle Luz structured types
+    //? Handle Luz structured types
     if (typeof left === "object" && left !== null && "__type" in left) {
       const type = left.__type;
       const value = left.__value;
@@ -383,7 +402,6 @@ export class Luz {
       code: ExitCode.SemanticError,
     };
   }
-
 
   // private evaluateCondition(
   //   conditionStart: number,
@@ -587,9 +605,8 @@ export class Luz {
     }
     this.next();
   }
-  //!
 
-  private tryParseLValue(): { get: () => any; set: (v: any) => void } | null {
+  private tryParseLValue(): { get: () => any; set: (v: any) => void; delete: () => any } | null {
     const initialState = { pos: this.pos, vars: new Map(this.vars) };
     let varName: string | null = null;
     const indices: any[] = [];
@@ -598,59 +615,208 @@ export class Luz {
       if (!this.isVariableToken(this.peek())) return null;
       varName = this.next();
 
-      while (this.peek() === "[") {
-        this.next();
-        const index = this.parseExpression();
-        indices.push(index);
-        if (this.peek() !== "]") throw new Error("Expected ]");
-        this.next();
+      while (this.peek() === "[" || this.peek() === ".") {
+        // Check for both '[' and '.' for indices
+        if (this.peek() === "[") {
+          this.next();
+          const index = this.parseExpression();
+          indices.push(index);
+          if (this.peek() !== "]") throw new Error("Expected ]");
+          this.next();
+        } else if (this.peek() === ".") {
+          this.next();
+          const indexToken = this.next();
+          if (!this.isNumberToken(indexToken)) {
+            throw new Error("Expected number after dot for index access");
+          }
+          const index = Number(indexToken.replace(/_/g, ""));
+          indices.push(index);
+        }
       }
 
-      //? Validate variable exists and not const
-      if (!this.vars.has(varName))
+      if (!this.vars.has(varName)) {
         throw new Error(`Undefined variable '${varName}'`);
+      }
+
       const varData = this.vars.get(varName)!;
-      if (varData.const) throw new Error(`Cannot modify constant '${varName}'`);
+      if (varData.const) {
+        throw {
+          message: `Cannot modify constant '${varName}'`,
+          code: ExitCode.SemanticError,
+        };
+      }
 
       return {
-        //? YUH!
         get: () => {
           let value = varData.value;
           for (const indexExpr of indices) {
             const idx = this.evalIndex(indexExpr, value);
-            value = value.__value[idx];
+            if (
+              value &&
+              typeof value === "object" &&
+              "__value" in value &&
+              Array.isArray(value.__value)
+            ) {
+              value = value.__value[idx];
+            } else if (Array.isArray(value)) {
+              value = value[idx];
+            } else {
+              throw {
+                message: `Cannot access index of non-array type for ${varName}`,
+                code: ExitCode.SemanticError,
+              };
+            }
           }
           return value;
         },
         set: (newValue: any) => {
-          let container = varData.value;
-          const resolvedIndices = [];
-          for (const indexExpr of indices) {
-            const idx = this.evalIndex(indexExpr, container);
-            resolvedIndices.push(idx);
-            container = container.__value[idx];
+          const currentVarData = this.vars.get(varName!)!;
+          if (currentVarData.const) {
+            throw {
+              message: `Cannot modify constant '${varName}'`,
+              code: ExitCode.SemanticError,
+            };
           }
-          if (resolvedIndices.length === 0) {
-            varData.value = newValue;
+
+          if (indices.length === 0) {
+            currentVarData.value = newValue;
           } else {
-            let parent = varData.value;
+            let container = currentVarData.value;
+            const resolvedIndices = [];
+            for (const indexExpr of indices) {
+              const idx = this.evalIndex(indexExpr, container);
+              resolvedIndices.push(idx);
+              if (resolvedIndices.length < indices.length) {
+                if (
+                  container &&
+                  typeof container === "object" &&
+                  "__value" in container
+                ) {
+                  container = container.__value[idx!];
+                } else if (Array.isArray(container)) {
+                  container = container[idx!];
+                } else {
+                  throw {
+                    message: `Cannot access index of non-array type for ${varName}`,
+                    code: ExitCode.SemanticError,
+                  };
+                }
+              }
+            }
+
+            let parent = currentVarData.value;
             for (let i = 0; i < resolvedIndices.length - 1; i++) {
-              parent = parent.__value[resolvedIndices[i]!];
+              if (parent && typeof parent === "object" && "__value" in parent) {
+                parent = parent.__value[resolvedIndices[i]!];
+              } else if (Array.isArray(parent)) {
+                parent = parent[resolvedIndices[i]!];
+              } else {
+                throw {
+                  message: `Cannot access index of non-array type for ${varName}`,
+                  code: ExitCode.SemanticError,
+                };
+              }
             }
             const lastIdx = resolvedIndices[resolvedIndices.length - 1];
-            parent.__value[lastIdx!] = newValue;
+            if (
+              parent &&
+              typeof parent === "object" &&
+              "__value" in parent &&
+              Array.isArray(parent.__value)
+            ) {
+              parent.__value[lastIdx!] = newValue;
+            } else if (Array.isArray(parent)) {
+              parent[lastIdx!] = newValue;
+            } else {
+              throw {
+                message: `Cannot set index of non-array type for ${varName}`,
+                code: ExitCode.SemanticError,
+              };
+            }
+          }
+        },
+        delete: () => {
+          const currentVarData = this.vars.get(varName!)!;
+
+          if (indices.length === 0) {
+            // Delete entire variable
+            this.vars.delete(varName!);
+          } else {
+            // Delete element from container
+            let container = currentVarData.value;
+            const resolvedIndices = [];
+
+            // Traverse to the parent container of the element to delete
+            for (let i = 0; i < indices.length - 1; i++) {
+              const idx = this.evalIndex(indices[i], container);
+              resolvedIndices.push(idx);
+
+              if (
+                container &&
+                typeof container === "object" &&
+                "__value" in container
+              ) {
+                container = container.__value[idx];
+              } else if (Array.isArray(container)) {
+                container = container[idx];
+              } else {
+                throw {
+                  message: `Cannot access index of non-array type for ${varName}`,
+                  code: ExitCode.SemanticError,
+                };
+              }
+            }
+
+            const lastIdx = this.evalIndex(
+              indices[indices.length - 1],
+              container
+            );
+
+            // Validate container type before deletion
+            if (
+              container &&
+              typeof container === "object" &&
+              "__value" in container
+            ) {
+              if (container.__type === "arr") {
+                throw {
+                  message: `Cannot delete from fixed-size array`,
+                  code: ExitCode.SemanticError,
+                };
+              } else if (container.__type === "vec") {
+                // Perform vector deletion
+                container.__value.splice(lastIdx, 1);
+              } else {
+                throw {
+                  message: `Delete operation not supported for ${container.__type}`,
+                  code: ExitCode.SemanticError,
+                };
+              }
+            } else if (Array.isArray(container)) {
+              // Handle plain JS arrays
+              container.splice(lastIdx, 1);
+            } else {
+              throw {
+                message: `Cannot delete from non-array type`,
+                code: ExitCode.SemanticError,
+              };
+            }
           }
         },
       };
-    } catch (e) {
+    } catch (e: any) {
       this.pos = initialState.pos;
       this.vars = new Map(initialState.vars);
+
+      if (e && e.code === ExitCode.SemanticError) {
+        throw e;
+      }
       return null;
     }
   }
 
   private getIterableElements(iterable: any): Iterable<any> {
-    if (iterable instanceof Range || iterable instanceof XRange)
+    if (iterable instanceof XRange || iterable instanceof Range)
       return iterable.__value;
 
     if (typeof iterable === "string") return Array.from(iterable);
@@ -673,11 +839,6 @@ export class Luz {
   }
 
   private parseBreakStatement(): any {
-    if (/\bbreak\s*\r?\n/g.test(this.peek())) {
-      this.next();
-      throw new BreakSignal(null);
-    }
-
     this.next();
     let value = null;
 
@@ -690,48 +851,66 @@ export class Luz {
   }
 
   private parseIfExpression(): any {
-    this.next(); //? if
-    const cond = this.parseExpression(); //? Parse the condition
+    this.next();
+    const cond = this.parseExpression();
 
     let thenValue: any = null;
     let elseValue: any = null;
 
     if (this.peek() !== "{") {
       throw {
-        message:
-          "Syntax Error: Expected '{' after 'if' condition to start the branch",
+        message: "Expected '{' after 'if' condition",
         code: ExitCode.SystaxError,
       };
     }
+
     if (cond) {
-      thenValue = this.parseBlock(); 
+      thenValue = this.parseBlock();
+
+      if (this.peek() === "else") {
+        this.skipElseIfChain();
+      }
     } else {
       this.skipBlock();
-    }
-
- 
-    if (this.peek() === "else") {
-      this.next(); //? else
-
-      if (this.peek() !== "{") {
-        throw {
-          message:
-            "Syntax Error: Expected '{' after 'else' to start the 'else' branch",
-          code: ExitCode.SystaxError,
-        };
-      }
-      
-      if (cond) {
-        this.skipBlock();
-      } else {
-        elseValue = this.parseBlock();
+      // ? else if or else
+      if (this.peek() === "else") {
+        this.next();
+        if (this.peek() === "if") {
+          elseValue = this.parseIfExpression();
+        } else if (this.peek() === "{") {
+          elseValue = this.parseBlock();
+        } else {
+          throw {
+            message: "Expected 'if' or '{' after 'else'",
+            code: ExitCode.SystaxError,
+          };
+        }
       }
     }
 
     return cond ? thenValue : elseValue;
   }
 
+  private skipElseIfChain(): void {
+    while (this.peek() === "else") {
+      this.next();
 
+      if (this.peek() === "if") {
+        this.next();
+        this.isSkipping = true;
+        this.parseExpression();
+        this.isSkipping = false;
+        if (this.peek() === "{") this.skipBlock();
+      } else if (this.peek() === "{") {
+        this.skipBlock();
+        break; //! NO more else!
+      } else
+        throw {
+          message: "Expected 'if' or '{' after 'else'",
+          code: ExitCode.SystaxError,
+        };
+    }
+  }
 
   private skipBlock(): void {
     let depth = 1;
@@ -760,8 +939,8 @@ export class Luz {
   }
 
   private getType(value: any): (typeof Luz.TYPES)[number] {
-    if (value instanceof Range) return "ran";
-    if (value instanceof XRange) return "xran";
+    if (value instanceof XRange) return "ran";
+    if (value instanceof Range) return "xran";
 
     if (typeof value === "object" && value !== null && "__type" in value) {
       return value.__type;
@@ -805,15 +984,23 @@ export class Luz {
         this.next();
 
         let bracketDepth = 0;
-        while (this.peek() === "[") {
-          bracketDepth++;
-          this.next();
+        while (this.peek() === "[" || this.peek() === ".") {
+          if (this.peek() === "[") {
+            bracketDepth++;
+            this.next();
 
-          let depth = 1;
-          while (depth > 0 && this.pos < this.tokens.length) {
-            const tok = this.next();
-            if (tok === "[") depth++;
-            if (tok === "]") depth--;
+            let depth = 1;
+            while (depth > 0 && this.pos < this.tokens.length) {
+              const tok = this.next();
+              if (tok === "[") depth++;
+              if (tok === "]") depth--;
+            }
+          } else if (this.peek() === ".") {
+            this.next();
+            const indexToken = this.next();
+            if (!this.isNumberToken(indexToken)) {
+              throw new Error("Expected number after dot for index access");
+            }
           }
         }
 
@@ -836,181 +1023,248 @@ export class Luz {
       this.vars = new Map(initialState.vars);
 
       varName = this.next();
-      while (this.peek() === "[") {
-        this.next();
-        indices.push(this.parseExpression());
-        if (this.peek() !== "]") {
-          throw { message: "Expected ']'", code: ExitCode.SystaxError };
-        }
-        this.next();
-      }
-    } catch {
-      this.pos = initialState.pos;
-      this.vars = new Map(initialState.vars);
-      return this.parseRange();
-    }
 
-    const op = this.next();
-    const rhs = this.parseAssignment();
-
-    if (indices.length > 0) {
-      if (!varName || !this.vars.has(varName)) {
+      if (this.isLiteralToken(varName)) {
         throw {
-          message: `Undefined variable '${varName}'`,
+          message: `Cannot assign to literal!`,
           code: ExitCode.SemanticError,
         };
       }
 
-      const varData = this.vars.get(varName);
-      if (varData.const) {
+      if (Luz.KEYWORDS.includes(varName as any)) {
         throw {
-          message: `Cannot modify constant '${varName}'`,
+          message: `Cannot assign to ${varName} because it is a keyword!`,
           code: ExitCode.SemanticError,
         };
       }
 
-      let container = varData.value;
-      for (let i = 0; i < indices.length - 1; i++) {
-        const idx = this.evalIndex(indices[i], container);
-        container = container.__value[idx];
-      }
-
-      const lastIdx = this.evalIndex(indices[indices.length - 1], container);
-      this.applyAssignment(container, lastIdx, op, rhs);
-      return container.__value[lastIdx];
-    }
-
-    let result;
-    let type: (typeof Luz.TYPES)[number] = "null";
-
-    if (typeof rhs === "object" && rhs !== null && "__type" in rhs) {
-      result = rhs;
-      type = rhs.__type;
-    } else {
-      result = rhs;
-      switch (typeof result) {
-        case "number":
-          type = "num";
-          if (!Number.isFinite(result)) type = "inf";
-          break;
-        case "bigint":
-          type = "xl";
-          break;
-        case "boolean":
-          type = "bool";
-          break;
-        case "string":
-          type = "str";
-          break;
-        case "object":
-          if (result === null) type = "null";
-          break;
-        default:
-          type = "null";
-      }
-    }
-
-    if (op !== "=") {
-      const current = this.vars.get(varName).value;
-      switch (op) {
-        case "+=":
-          if (
-            typeof current === "object" &&
-            current !== null &&
-            "__value" in current &&
-            "__type" in current
-          ) {
-            if (current.__type === "arr") {
-              throw {
-                message: `Cannot add '${rhs}' to an 'arr', use 'vec' instead`,
-                code: ExitCode.InvalidInstruction,
-              };
-            } else if (current.__type === "vec") {
-              current.__value.push(rhs);
-            } else if (current.__type === "set") {
-              current.__value.add(rhs);
-            }
-
-            result = current;
-          } else {
-            result = current + rhs;
+      while (this.peek() === "[" || this.peek() === ".") {
+        if (this.peek() === "[") {
+          this.next();
+          indices.push(this.parseExpression());
+          if (this.peek() !== "]") {
+            throw { message: "Expected ']'", code: ExitCode.SystaxError };
           }
-          break;
-        case "-=":
-          if (this.getType(current) === "vec") {
-            const valueToRemove = rhs;
-            const vecValues = current.__value;
-            if (
-              vecValues.length > 0 &&
-              vecValues[vecValues.length - 1] === valueToRemove
-            ) {
-              vecValues.pop();
-            } else {
-              let i = vecValues.length - 1;
-              while (i >= 0) {
-                if (vecValues[i] === valueToRemove) {
-                  vecValues.splice(i, 1);
-                }
-                i--;
-              }
-            }
-            result = current;
-          } else if (this.getType(current) === "arr") {
+          this.next();
+        } else if (this.peek() === ".") {
+          this.next(); // Consume the dot
+          const indexToken = this.next();
+          if (!this.isNumberToken(indexToken)) {
             throw {
-              message: "Cannot subtract from 'arr', use 'vec' instead",
-              code: ExitCode.InvalidInstruction,
+              message: "Expected number after '.' for index access",
+              code: ExitCode.SystaxError,
             };
-          } else {
-            result = current - rhs;
           }
-          break;
-        case "*=":
-          result = current * rhs;
-          break;
-        case "/=":
-          result = current / rhs;
-          break;
-        case "~/=":
-          result = Math.floor(current / rhs);
-          break;
-        case "%=":
-          result = current % rhs;
-          break;
-        case "**=":
-          result = current ** rhs;
-          break;
-        case "^=":
-          result = current ^ rhs;
-          break;
+          const index = Number(indexToken.replace(/_/g, ""));
+          indices.push(index);
+        }
       }
 
-      if (typeof current !== typeof result) {
-        throw {
-          message: `Type mismatch in compound assignment for '${varName}'`,
-          code: ExitCode.SemanticError,
-        };
-      }
-    }
+      const op = this.next();
+      const rhs = this.parseAssignment();
 
-    if (varName) {
-      if (this.vars.has(varName)) {
-        const existingVar = this.vars.get(varName)!;
-        if (existingVar.const) {
+      if (indices.length > 0) {
+        if (!varName || !this.vars.has(varName)) {
           throw {
-            message: `Cannot reassign constant '${varName}'`,
+            message: `Undefined variable '${varName}'`,
             code: ExitCode.SemanticError,
           };
         }
-        this.vars.get(varName)!.value = result;
-        existingVar.type = this.getType(result);
-      } else {
-        this.vars.set(varName, { value: result, const: isConst, type });
+
+        const varData = this.vars.get(varName);
+        if (varData.const) {
+          throw {
+            message: `Cannot modify constant '${varName}'`,
+            code: ExitCode.SemanticError,
+          };
+        }
+
+        let container = varData.value;
+        for (let i = 0; i < indices.length - 1; i++) {
+          const idx = this.evalIndex(indices[i], container);
+          if (
+            container &&
+            typeof container === "object" &&
+            "__value" in container
+          ) {
+            container = container.__value[idx];
+          } else if (Array.isArray(container)) {
+            container = container[idx];
+          } else
+            throw {
+              message: `Cannot access index of non-array type for ${varName}`,
+              code: ExitCode.SemanticError,
+            };
+        }
+
+        const lastIdx = this.evalIndex(indices[indices.length - 1], container);
+        this.applyAssignment(container, lastIdx, op, rhs);
+        return container.__value[lastIdx];
       }
+
+      let result;
+      let type: (typeof Luz.TYPES)[number] = "null";
+
+      if (typeof rhs === "object" && rhs !== null && "__type" in rhs) {
+        result = rhs;
+        type = rhs.__type;
+      } else {
+        result = rhs;
+        switch (typeof result) {
+          case "number":
+            type = "num";
+            if (!Number.isFinite(result)) type = "inf";
+            break;
+          case "bigint":
+            type = "xl";
+            break;
+          case "boolean":
+            type = "bool";
+            break;
+          case "string":
+            type = "str";
+            break;
+          case "object":
+            if (result === null) type = "null";
+            break;
+          default:
+            type = "null";
+        }
+      }
+
+      if (op !== "=") {
+        const current = this.vars.get(varName).value;
+        switch (op) {
+          case "+=":
+            if (
+              typeof current === "object" &&
+              current !== null &&
+              "__value" in current &&
+              "__type" in current
+            ) {
+              if (current.__type === "arr") {
+                throw {
+                  message: `Cannot add '${this.asStr(
+                    rhs
+                  )}' to an 'arr', use 'vec' instead`,
+                  code: ExitCode.InvalidInstruction,
+                };
+              } else if (current.__type === "vec") {
+                current.__value.push(rhs);
+              } else if (current.__type === "set") {
+                current.__value.add(rhs);
+              }
+
+              result = current;
+            } else if (current instanceof Range || current instanceof XRange) {
+              if (typeof rhs !== "number")
+                throw {
+                  message: `Cannot add non-numeric value '${this.asDebugStr(
+                    rhs
+                  )}' to range`,
+                  code: ExitCode.InvalidInstruction,
+                };
+
+              current.end += rhs;
+              result = current;
+            } else {
+              result = current + rhs;
+            }
+            break;
+          case "-=":
+            const __type = this.getType(current);
+            if (__type === "vec") {
+              for (let i = current.__value.length - 1; i >= 0; i--) {
+                const value = current.__value[i];
+
+                if (value === rhs) {
+                  if (i === current.__value.length - 1) current.__value.pop();
+                  else current.__value.splice(i, 1);
+                  break;
+                }
+              }
+
+              result = current;
+            } else if (__type === "arr") {
+              throw {
+                message: `Cannot subtract '${this.asDebugStr(
+                  rhs
+                )}' from 'arr', use 'vec' instead`,
+                code: ExitCode.InvalidInstruction,
+              };
+            } else if (__type === "set") {
+              current.__value.delete(rhs);
+              result = current;
+            } else if (current instanceof Range || current instanceof XRange) {
+              if (typeof rhs !== "number")
+                throw {
+                  message: `Cannot subtract non-numeric value '${this.asDebugStr(
+                    rhs
+                  )}' to range`,
+                  code: ExitCode.InvalidInstruction,
+                };
+
+              current.end -= rhs;
+              result = current;
+            } else {
+              result = current - rhs;
+            }
+            break;
+          case "*=":
+            result = current * rhs;
+            break;
+          case "/=":
+            result = current / rhs;
+            break;
+          case "~/=":
+            result = Math.floor(current / rhs);
+            break;
+          case "%=":
+            result = current % rhs;
+            break;
+          case "**=":
+            result = current ** rhs;
+            break;
+          case "^=":
+            result = current ^ rhs;
+            break;
+        }
+
+        if (typeof current !== typeof result) {
+          throw {
+            message: `Type mismatch in compound assignment for '${varName}'`,
+            code: ExitCode.SemanticError,
+          };
+        }
+      }
+
+      if (varName) {
+        if (this.vars.has(varName)) {
+          const existingVar = this.vars.get(varName)!;
+          if (existingVar.const) {
+            throw {
+              message: `Cannot reassign constant '${varName}'`,
+              code: ExitCode.SemanticError,
+            };
+          }
+          this.vars.get(varName)!.value = result;
+          existingVar.type = this.getType(result);
+        } else {
+          this.vars.set(varName, { value: result, const: isConst, type });
+        }
+      }
+
+      return result;
+    } catch (e: any) {
+      this.pos = initialState.pos;
+      this.vars = new Map(initialState.vars);
+
+      if (e && e.code === ExitCode.SemanticError) {
+        throw e;
+      }
+      return this.parseRange();
     }
-
-    return result;
   }
-
   private parseAddSub(): any {
     let left = this.parsePow();
 
@@ -1020,7 +1274,17 @@ export class Luz {
         this.next();
         const right = this.parsePow();
         if (op === "+") {
-          if (
+          if (left instanceof Range || left instanceof XRange) {
+            if (typeof right !== "number")
+              throw {
+                message: `Cannot add non-numeric value '${this.asDebugStr(
+                  right
+                )}' to range`,
+                code: ExitCode.InvalidInstruction,
+              };
+
+            left.end += right;
+          } else if (
             typeof left === "object" &&
             left !== null &&
             "__value" in left &&
@@ -1034,20 +1298,21 @@ export class Luz {
                 code: ExitCode.InvalidInstruction,
               };
             } else if (__type === "vec") {
-              //!left.__value.push(right);
-
-              left = {
-                __type,
-                __value: [...left.__value, right],
-              };
+              left.__value.push(right);
             } else if (__type === "set") {
-              //! left.__value.add(right);
-
-              left = {
-                __type,
-                __value: new Set([...left.__value, right]),
-              };
+              left.__value.add(right);
             }
+          } else if (right instanceof Range || right instanceof XRange) {
+            if (typeof left !== "number")
+              throw {
+                message: `Cannot add non-numeric value '${this.asDebugStr(
+                  left
+                )}' to range`,
+                code: ExitCode.InvalidInstruction,
+              };
+
+            right.start += left;
+            left = right;
           } else if (
             typeof right === "object" &&
             right !== null &&
@@ -1062,52 +1327,93 @@ export class Luz {
                 code: ExitCode.InvalidInstruction,
               };
             } else if (__type === "vec") {
-              left = {
-                __type,
-                __value: [left, ...right.__value],
-              };
+              right.__value.unshift(left);
+
+              left = right;
             } else if (__type === "set") {
-              left = {
-                __type,
-                __value: right.__value.add(left),
-              };
+              right.__value.add(left);
+              left = right;
             }
           } else left = left + right;
         } else {
-          const leftType = this.getType(left);
-          const rightType = this.getType(right);
-
-          // Check for array or vector in subtraction
-          if (
-            leftType === "vec" ||
-            rightType === "vec" ||
-            leftType === "arr" ||
-            rightType === "arr"
-          ) {
-            if (leftType === "arr" || rightType === "arr") {
+          if (left instanceof Range || left instanceof XRange) {
+            if (typeof right !== "number")
               throw {
-                message: "Subtraction not allowed for 'arr', use 'vec' instead",
+                message: `Cannot subtract non-numeric value '${this.asDebugStr(
+                  right
+                )}' to range`,
                 code: ExitCode.InvalidInstruction,
               };
-            }
 
-            let vector = leftType === "vec" ? left : right;
-            const valueToRemove = leftType === "vec" ? right : left;
+            left.end -= right;
+          } else if (
+            typeof left === "object" &&
+            left !== null &&
+            "__value" in left &&
+            "__type" in left
+          ) {
+            const __type: "arr" | "vec" | "set" = left.__type;
 
-            const newValues = [...vector.__value];
-            let i = newValues.length - 1;
-            while (i >= 0) {
-              if (newValues[i] === valueToRemove) {
-                newValues.splice(i, 1);
-                break;
+            if (__type === "arr") {
+              throw {
+                message: `Cannot subtract '${right}' to an 'arr', use 'vec' instead`,
+                code: ExitCode.InvalidInstruction,
+              };
+            } else if (__type === "vec") {
+              for (let i = left.__value.length - 1; i >= 0; i--) {
+                const value = left.__value[i];
+
+                if (value === right) {
+                  if (i === left.__value.length - 1) left.__value.pop();
+                  else left.__value.splice(i, 1);
+                  break;
+                }
               }
-              i--;
+              left = right;
+            } else if (__type === "set") {
+              left.__value.delete(right);
+              left = right;
             }
+          } else if (right instanceof Range || right instanceof XRange) {
+            if (typeof left !== "number")
+              throw {
+                message: `Cannot add non-numeric value '${this.asDebugStr(
+                  left
+                )}' to range`,
+                code: ExitCode.InvalidInstruction,
+              };
 
-            left = { __type: "vec", __value: newValues };
-          } else {
-            left = left - right;
-          }
+            right.start -= left;
+            left = right;
+          } else if (
+            typeof right === "object" &&
+            right !== null &&
+            "__value" in right &&
+            "__type" in right
+          ) {
+            const __type: "arr" | "vec" | "set" = right.__type;
+
+            if (__type === "arr") {
+              throw {
+                message: `Cannot add '${left}' to an 'arr', use 'vec' instead`,
+                code: ExitCode.InvalidInstruction,
+              };
+            } else if (__type === "vec") {
+              for (let i = 0; i < right.__value.length; i++) {
+                const value = right.__value[i];
+
+                if (value === left) {
+                  right.__value.splice(i, 1);
+                  break;
+                }
+              }
+              left = right.__value;
+            } else if (__type === "set") {
+              right.__value.delete(left);
+
+              left = right.__value;
+            }
+          } else left = left - right;
         }
       } else {
         break;
@@ -1164,7 +1470,7 @@ export class Luz {
     return left;
   }
 
-  private formatValue(value: any, visited: Set<any> = new Set()): string {
+  private asStr(value: any, visited: Set<any> = new Set()): string {
     if (visited.has(value)) {
       //? Circular reference handling
       if (value.__type === "set") {
@@ -1173,8 +1479,10 @@ export class Luz {
       return `${value.__type === "vec" ? "!" : ""}[...]`;
     }
 
-    if (value instanceof Range) return `${value.start}..${value.end}`;
-    if (value instanceof XRange) return `${value.start}..=${value.end}`;
+    if (value instanceof XRange)
+      return `${this.asStr(value.start)}..${this.asStr(value.end)}`;
+    if (value instanceof Range)
+      return `${this.asStr(value.start)}..=${this.asStr(value.end)}`;
 
     if (typeof value === "object" && value !== null && "__type" in value) {
       visited.add(value);
@@ -1182,12 +1490,17 @@ export class Luz {
       let elements: string[];
       if (value.__type === "set") {
         elements = Array.from(value.__value).map((el: any) =>
-          this.formatValue(el, visited)
+          this.asStr(el, visited)
         );
+      } else if (value.__type === "vec") {
+        const vecValue = value.__value;
+        const denseVec = [];
+        for (let i = 0; i < vecValue.length; i++) {
+          denseVec.push(i in vecValue ? vecValue[i] : null);
+        }
+        elements = denseVec.map((el: any) => this.asStr(el, visited));
       } else {
-        elements = value.__value.map((el: any) =>
-          this.formatValue(el, visited)
-        );
+        elements = value.__value.map((el: any) => this.asStr(el, visited));
       }
 
       visited.delete(value);
@@ -1201,18 +1514,19 @@ export class Luz {
       }
     } else if (Array.isArray(value)) {
       visited.add(value);
-      const elements = value
-        .map((el) => this.formatValue(el, visited))
-        .join(" ");
+      const elements = value.map((el) => this.asStr(el, visited)).join(" ");
       visited.delete(value);
       return `[${elements}]`;
     }
 
-    if (typeof value === "number" && !Number.isFinite(value)) return "inf";
+    if (Number.isNaN(value)) return "null"; //TODO Handle ops in compund assigment!
+    if (typeof value === "number" && !Number.isFinite(value))
+      return `${value < 0 ? "-" : ""}inf`;
+
     return String(value);
   }
 
-  private formatValueDebug(value: any, visited: Set<any> = new Set()): string {
+  private asDebugStr(value: any, visited: Set<any> = new Set()): string {
     if (visited.has(value)) {
       //? Circular reference handling
       if (value.__type === "set") {
@@ -1221,8 +1535,10 @@ export class Luz {
       return `${value.__type === "vec" ? "!" : ""}[...]`;
     }
 
-    if (value instanceof Range) return `${value.start}..${value.end}`;
-    if (value instanceof XRange) return `${value.start}..=${value.end}`;
+    if (value instanceof XRange)
+      return `${this.asDebugStr(value.start)}..${this.asDebugStr(value.end)}`;
+    if (value instanceof Range)
+      return `${this.asDebugStr(value.start)}..=${this.asDebugStr(value.end)}`;
 
     if (typeof value === "object" && value !== null && "__type" in value) {
       visited.add(value);
@@ -1230,12 +1546,17 @@ export class Luz {
       let elements: string[];
       if (value.__type === "set") {
         elements = Array.from(value.__value).map((el: any) =>
-          this.formatValueDebug(el, visited)
+          this.asDebugStr(el, visited)
         );
+      } else if (value.__type === "vec") {
+        const vecValue = value.__value;
+        const denseVec = [];
+        for (let i = 0; i < vecValue.length; i++) {
+          denseVec.push(i in vecValue ? vecValue[i] : null);
+        }
+        elements = denseVec.map((el: any) => this.asStr(el, visited));
       } else {
-        elements = value.__value.map((el: any) =>
-          this.formatValueDebug(el, visited)
-        );
+        elements = value.__value.map((el: any) => this.asDebugStr(el, visited));
       }
 
       visited.delete(value);
@@ -1250,13 +1571,15 @@ export class Luz {
     } else if (Array.isArray(value)) {
       visited.add(value);
       const elements = value
-        .map((el) => this.formatValueDebug(el, visited))
+        .map((el) => this.asDebugStr(el, visited))
         .join(" ");
       visited.delete(value);
       return `[${elements}]`;
     }
 
-    if (typeof value === "number" && !Number.isFinite(value)) return "inf";
+    if (Number.isNaN(value)) return "null"; //TODO Handle ops in compund assigment!
+    if (typeof value === "number" && !Number.isFinite(value))
+      return `${value < 0 ? "-" : ""}inf`;
     if (typeof value === "bigint") return `${value}xl`;
     if (typeof value === "string")
       return `"${value.replace(/\n/g, "\\n").replace(/\t/g, "\\t")}"`;
@@ -1275,7 +1598,7 @@ export class Luz {
         if (this.peek() === "typeof") {
           this.next();
 
-          const typeReference = this.parsePrimary();
+          const typeReference = this.parseUnary();
           targetType = this.getType(typeReference);
         } else {
           targetType = this.next() as (typeof Luz.TYPES)[number];
@@ -1288,7 +1611,7 @@ export class Luz {
           };
         }
 
-        if (left instanceof Range || left instanceof XRange) {
+        if (left instanceof XRange || left instanceof Range) {
           const values = Array.from(left.__value);
           switch (targetType) {
             case "vec":
@@ -1304,15 +1627,15 @@ export class Luz {
               left = values.join(" ");
               break;
             case "ran":
-              if (left instanceof XRange) {
+              if (left instanceof Range) {
                 const adj = left.start <= left.end ? 1 : -1;
-                left = new Range(left.start, left.end + adj);
+                left = new XRange(left.start, left.end + adj);
               }
               continue;
             case "xran":
-              if (left instanceof Range) {
+              if (left instanceof XRange) {
                 const adj = left.start < left.end ? -1 : 1;
-                left = new XRange(left.start, left.end + adj);
+                left = new Range(left.start, left.end + adj);
               }
               continue;
           }
@@ -1332,18 +1655,17 @@ export class Luz {
             castedValue = BigInt(valueToCast);
             break;
           case "str":
-            castedValue = isStruct
-              ? this.formatValue(left)
-              : String(valueToCast);
+            // castedValue = isStruct ? this.asStr(left) : String(valueToCast);
+            castedValue = this.asStr(left);
             break;
           case "bool":
             castedValue = Boolean(valueToCast);
             break;
           case "maybe":
-            if (left instanceof Range || left instanceof XRange) {
+            if (left instanceof XRange || left instanceof Range) {
               const start = left.start;
               const end = left.end;
-              if (left instanceof Range) {
+              if (left instanceof XRange) {
                 castedValue = start + Math.floor(Math.random() * (end - start));
               } else {
                 castedValue =
@@ -1481,25 +1803,19 @@ export class Luz {
   private parseUnary(): any {
     const currentToken = this.peek();
 
-    // Handle prefix operators (++var, --var)
     if (currentToken.startsWith("++") || currentToken.startsWith("--")) {
       const operator = currentToken.slice(0, 2);
       const variablePart = currentToken.slice(2);
 
-      // Save current state
       const originalTokens = this.tokens;
       const originalPos = this.pos;
 
-      // Tokenize variablePart
       const newTokens = variablePart.match(Luz.tokensRegExp) || [];
-      // Replace tokens and reset pos
       this.tokens = newTokens;
       this.pos = 0;
 
-      // Parse the variablePart as an l-value
       const lValue = this.tryParseLValue();
 
-      // Restore original state
       this.tokens = originalTokens;
       this.pos = originalPos;
 
@@ -1510,10 +1826,9 @@ export class Luz {
         };
       }
 
-      // Get current value
-      const current = lValue.get();
+      let current = lValue.get();
 
-      // Check type
+      //? Check type
       if (typeof current !== "number" && typeof current !== "bigint") {
         throw {
           message: `Cannot apply unary '${operator}' to non-numeric variable`,
@@ -1521,15 +1836,18 @@ export class Luz {
         };
       }
 
-      // Update value
-      const newValue =
-        operator === "++" ? (current as number) + 1 : (current as number) - 1;
+      let newValue: number | bigint;
+
+      if (typeof current === "number") {
+        newValue = operator === "++" ? current + 1 : current - 1;
+      } else {
+        newValue = operator === "++" ? current + 1n : current - 1n;
+      }
+
       lValue.set(newValue);
 
-      // Consume the current token (prefix operator)
       this.next();
 
-      // Return new value (prefix)
       return newValue;
     }
 
@@ -1545,7 +1863,7 @@ export class Luz {
       const rhs = this.parseUnary();
       if (typeof rhs !== "number" && typeof rhs !== "bigint") {
         throw {
-          message: `Operand of bitwise NOT '~' must be a 'num' or 'big'`,
+          message: `Operand of bitwise NOT '~' must be a 'num' or 'xl'`,
           code: ExitCode.SemanticError,
         };
       }
@@ -1555,7 +1873,7 @@ export class Luz {
     if (op === "log" || op === "logln") {
       this.next();
 
-      if (this.peek() === ";") {
+      if (";})([]".includes(this.peek())) {
         if (op === "log") process.stdout.write("");
         else console.log("");
         return "";
@@ -1563,7 +1881,7 @@ export class Luz {
 
       const rhs = this.parseExpression();
 
-      const out = this.formatValue(rhs);
+      const out = this.asStr(rhs);
 
       if (op === "log") process.stdout.write(out);
       else console.log(out);
@@ -1572,13 +1890,13 @@ export class Luz {
 
     if (op === "get") {
       const getInput = (promptText?: string): string => {
-        if (this.pipeStdin === null) {
-          return this.rl(promptText ?? "");
-        } else {
-          const data = this.pipeStdin.shift();
-          return data ?? "";
-        }
+        if (this.pipeStdin === null) return this.rl(promptText ?? "");
+        // return prompt(promptText ?? "") ?? "" //! it uses an extra space so no for now!
+
+        const data = this.pipeStdin.shift();
+        return data ?? "";
       };
+
       this.next();
 
       if (";})],{".includes(this.peek())) return getInput();
@@ -1590,14 +1908,14 @@ export class Luz {
         return getInput();
 
       const promptArg = this.parsePrimary();
-      const prompt = this.formatValue(promptArg); //? maybeeee
+      const pro = this.asStr(promptArg); //? maybeeee
 
-      return getInput(prompt);
+      return getInput(pro);
     }
 
     if (op === "lenof") {
       this.next();
-      const rhs = this.parsePrimary();
+      const rhs = this.parsePrimary(); //!
 
       if (typeof rhs === "string") {
         return rhs.length;
@@ -1617,7 +1935,7 @@ export class Luz {
 
     if (op === "copyof") {
       this.next();
-      const rhs = this.parsePrimary();
+      const rhs = this.parseExpression();
 
       if (typeof rhs === "object" && rhs !== null && "__value" in rhs)
         return structuredClone(rhs);
@@ -1629,8 +1947,8 @@ export class Luz {
       this.next();
       const rhs = this.parsePrimary();
 
-      if (rhs instanceof Range || rhs instanceof XRange) return rhs.start;
-      // if (rhs instanceof XRange) return rhs.start;
+      if (rhs instanceof XRange || rhs instanceof Range) return rhs.start;
+      // if (rhs instanceof Range) return rhs.start;
 
       if (typeof rhs === "object" && rhs !== null && "__value" in rhs) {
         const type: "vec" | "arr" | "set" = rhs.__type;
@@ -1641,7 +1959,7 @@ export class Luz {
           return rhs.__value.values().next().value ?? null;
         }
 
-        return null; //This shouldn't be reached!
+        return null; //?This shouldn't be reached!
       }
 
       if (typeof rhs === "string") return rhs[0] ?? null;
@@ -1654,8 +1972,9 @@ export class Luz {
       this.next();
       const rhs = this.parsePrimary();
 
-      if (rhs instanceof XRange) return rhs.end;
-      if (rhs instanceof Range) return rhs.end - Math.sign(rhs.end - rhs.start);
+      if (rhs instanceof Range) return rhs.end;
+      if (rhs instanceof XRange)
+        return rhs.end - Math.sign(rhs.end - rhs.start);
 
       if (typeof rhs === "object" && rhs !== null && "__value" in rhs) {
         const type: "vec" | "arr" | "set" = rhs.__type;
@@ -1679,13 +1998,13 @@ export class Luz {
 
     if (op === "sizeof") {
       this.next();
-      const rhs = this.parsePrimary();
+      const rhs = this.parseExpression();
       return this.calculateSize(rhs);
     }
 
     if (op === "typeof") {
       this.next();
-      const operand = this.parsePrimary();
+      const operand = this.parseExpression();
 
       let typeStr: (typeof Luz.TYPES)[number];
 
@@ -1721,27 +2040,30 @@ export class Luz {
 
     if (op === "del") {
       this.next();
-      const varName = this.next();
-      if (this.isLiteralToken(varName)) {
+
+      if (this.peek() === "*") {
+        this.next();
+        this.clearVars();
+        return null;
+      }
+
+      const lval = this.tryParseLValue();
+      if (!lval) {
         throw {
-          message: `Cannot delete a literal '${varName}'`,
+          message: `Invalid deletion target`,
           code: ExitCode.SemanticError,
         };
       }
-      if (Luz.KEYWORDS.includes(varName as any)) {
+
+      const value = lval.get();
+      if (typeof lval.delete === "function") {
+        lval.delete();
+      } else {
         throw {
-          message: `Cannot delete '${varName}', because it's a keyword`,
+          message: `Delete operation not supported for this type`,
           code: ExitCode.SemanticError,
         };
       }
-      if (!this.vars.has(varName)) {
-        throw {
-          message: `Cannot delete '${varName}', because it doesn't exist`,
-          code: ExitCode.SemanticError,
-        };
-      }
-      let value = this.vars.get(varName).value ?? null;
-      this.vars.delete(varName);
       return value;
     }
 
@@ -1941,14 +2263,12 @@ export class Luz {
           };
         }
 
-        // Create range instances instead of arrays
-        left = op === "..=" ? new XRange(left, right) : new Range(left, right);
+        left = op === "..=" ? new Range(left, right) : new XRange(left, right);
       } else break;
     }
 
     return left;
   }
-
 
   private parseArrLiteral(): any[] {
     const elements: any[] = [];
@@ -1959,17 +2279,17 @@ export class Luz {
     }
 
     const savedPos = this.pos;
-    let hasSemicolon = false;
+    let lastSemicolonPos = -1;
     let depth = 0;
 
+    // Find the last top-level semicolon
     while (this.pos < this.tokens.length) {
       const token = this.tokens[this.pos];
       if (token === ";") {
         if (depth === 0) {
-          hasSemicolon = true;
-          break;
+          lastSemicolonPos = this.pos;
         }
-      } else if (token === "[") {
+      } else if (token === "[" || token === "![") {
         depth++;
       } else if (token === "]") {
         depth--;
@@ -1980,36 +2300,14 @@ export class Luz {
 
     this.pos = savedPos;
 
-    if (hasSemicolon) {
+    if (lastSemicolonPos !== -1) {
       const exprStart = this.pos;
+      const exprEnd = lastSemicolonPos;
 
-      let exprEnd = -1;
-      depth = 0;
-      while (this.pos < this.tokens.length) {
-        const token = this.tokens[this.pos]!;
-        if (token === ";") {
-          if (depth === 0) {
-            exprEnd = this.pos;
-            break;
-          }
-        } else if (["[", "(", "{"].includes(token)) {
-          depth++;
-        } else if ([")", "]", "}"].includes(token)) {
-          depth--;
-        }
-        this.pos++;
-      }
+      const blockTokens = this.tokens.slice(exprStart, exprEnd);
+      this.pos = exprEnd + 1; // Move past ';'
 
-      if (exprEnd === -1) {
-        throw {
-          message: "Expected ';' in arr literal",
-          code: ExitCode.SystaxError,
-        };
-      }
-
-      this.pos = exprEnd + 1;
       const lengthExpr = this.parseExpression();
-
       const length = Number(lengthExpr);
 
       if (
@@ -2025,20 +2323,25 @@ export class Luz {
       }
 
       const postLengthPos = this.pos;
+      const originalTokens = this.tokens;
+      const originalVars = new Map(this.vars);
 
       for (let i = 0; i < length; i++) {
-        this.pos = exprStart;
-        const element = this.parseExpression();
-        if (this.pos !== exprEnd) {
-          throw {
-            message: "Element expression parsing mismatch",
-            code: ExitCode.SystaxError,
-          };
-        }
-        elements.push(element);
-      }
+        this.vars = new Map(originalVars);
 
-      this.pos = postLengthPos;
+        this.tokens = blockTokens;
+        this.pos = 0;
+
+        let element = null;
+        while (this.pos < this.tokens.length) {
+          element = this.parseStatement();
+        }
+
+        elements.push(element);
+
+        this.tokens = originalTokens;
+        this.pos = postLengthPos;
+      }
     } else {
       while (this.peek() !== "]") {
         if (this.peek() === ",") this.next();
@@ -2050,6 +2353,96 @@ export class Luz {
     if (this.peek() !== "]") {
       throw {
         message: "Expected ']' after arr elements",
+        code: ExitCode.SystaxError,
+      };
+    }
+    this.next();
+
+    return elements;
+  }
+
+  private parseVecLiteral(): Array<any> {
+    const elements: any[] = [];
+
+    if (this.peek() === "]") {
+      this.next();
+      return elements;
+    }
+
+    const savedPos = this.pos;
+    let lastSemicolonPos = -1;
+    let depth = 0;
+
+    while (this.pos < this.tokens.length) {
+      const token = this.tokens[this.pos];
+      if (token === ";") {
+        if (depth === 0) {
+          lastSemicolonPos = this.pos;
+        }
+      } else if (token === "[" || token === "![") {
+        depth++;
+      } else if (token === "]") {
+        depth--;
+        if (depth < 0) break;
+      }
+      this.pos++;
+    }
+
+    this.pos = savedPos;
+
+    if (lastSemicolonPos !== -1) {
+      const exprStart = this.pos;
+      const exprEnd = lastSemicolonPos;
+
+      const blockTokens = this.tokens.slice(exprStart, exprEnd);
+      this.pos = exprEnd + 1; //? After ;
+
+      const lengthExpr = this.parseExpression();
+      const length = Number(lengthExpr);
+
+      if (
+        lengthExpr === null ||
+        Number.isNaN(length) ||
+        length < 0 ||
+        !Number.isInteger(length)
+      ) {
+        throw {
+          message: `Invalid vec length '${this.asDebugStr(lengthExpr)}'`,
+          code: ExitCode.SemanticError,
+        };
+      }
+
+      const postLengthPos = this.pos;
+      const originalTokens = this.tokens;
+      const originalVars = new Map(this.vars);
+
+      for (let i = 0; i < length; i++) {
+        this.vars = new Map(originalVars);
+
+        this.tokens = blockTokens;
+        this.pos = 0;
+
+        let element = null;
+        while (this.pos < this.tokens.length) {
+          element = this.parseStatement();
+        }
+
+        elements.push(element);
+
+        this.tokens = originalTokens;
+        this.pos = postLengthPos;
+      }
+    } else {
+      while (this.peek() !== "]") {
+        if (this.peek() === ",") this.next();
+        const element = this.parseExpression();
+        elements.push(element);
+      }
+    }
+
+    if (this.peek() !== "]") {
+      throw {
+        message: "Expected ']' after vector elements",
         code: ExitCode.SystaxError,
       };
     }
@@ -2078,114 +2471,6 @@ export class Luz {
     return elements;
   }
 
-  private parseVecLiteral(): Array<any> {
-    const elements: any[] = [];
-
-    if (this.peek() === "]") {
-      this.next();
-      return elements;
-    }
-
-    const savedPos = this.pos;
-    let hasSemicolon = false;
-    let depth = 0;
-
-    while (this.pos < this.tokens.length) {
-      const token = this.tokens[this.pos];
-      if (token === ";") {
-        if (depth === 0) {
-          hasSemicolon = true;
-          break;
-        }
-      } else if (token === "[") {
-        depth++;
-      } else if (token === "]") {
-        depth--;
-        if (depth < 0) break;
-      }
-      this.pos++;
-    }
-
-    this.pos = savedPos;
-
-    if (hasSemicolon) {
-      const exprStart = this.pos;
-
-      let exprEnd = -1;
-      depth = 0;
-      while (this.pos < this.tokens.length) {
-        const token = this.tokens[this.pos]!;
-        if (token === ";") {
-          if (depth === 0) {
-            exprEnd = this.pos;
-            break;
-          }
-        } else if (["[", "(", "{"].includes(token)) {
-          depth++;
-        } else if ([")", "]", "}"].includes(token)) {
-          depth--;
-        }
-        this.pos++;
-      }
-
-      if (exprEnd === -1) {
-        throw {
-          message: "Expected ';' in vec literal",
-          code: ExitCode.SystaxError,
-        };
-      }
-
-      this.pos = exprEnd + 1;
-      const lengthExpr = this.parseExpression();
-
-      const length = Number(lengthExpr);
-
-      if (
-        lengthExpr === null ||
-        Number.isNaN(length) ||
-        length < 0 ||
-        !Number.isInteger(length)
-      ) {
-        throw {
-          message: `Invalid vec length '${lengthExpr}'`,
-          code: ExitCode.SemanticError,
-        };
-      }
-
-      const postLengthPos = this.pos;
-
-      for (let i = 0; i < length; i++) {
-        this.pos = exprStart;
-        const element = this.parseExpression();
-        if (this.pos !== exprEnd) {
-          throw {
-            message: "Element expression parsing mismatch",
-            code: ExitCode.SystaxError,
-          };
-        }
-        elements.push(element);
-      }
-
-      this.pos = postLengthPos;
-    } else {
-      while (this.peek() !== "]") {
-        if (this.peek() === ",") this.next(); 
-        const element = this.parseExpression();
-        elements.push(element);
-      }
-    }
-
-    if (this.peek() !== "]") {
-      throw {
-        message: "Expected ']' after vector elements",
-        code: ExitCode.SystaxError,
-      };
-    }
-    this.next();
-
-    return elements;
-  }
-
   private parseContinueStatement(): any {
     this.next();
 
@@ -2194,11 +2479,21 @@ export class Luz {
     throw new ContinueSignal();
   }
 
+  private getIndexValue(container: any, index: number): any {
+    if (typeof container === "string") {
+      return index >= 0 && index < container.length
+        ? container.charAt(index)
+        : null;
+    }
+    const values = container?.__value || container;
+    return values[index] ?? null;
+  }
+
   private parsePrimary(): any {
     if (this.peek() === "if") return this.parseIfExpression();
 
     if (this.peek() === "loop") return this.parseLoopExpression();
-    if (this.peek().startsWith("break")) return this.parseBreakStatement();
+    if (this.peek() === "break") return this.parseBreakStatement();
     if (this.peek() === "continue") return this.parseContinueStatement();
 
     const nextTok = this.peek();
@@ -2260,26 +2555,21 @@ export class Luz {
       let operator = "";
       let variablePart = tok;
 
-      // Check for postfix operators (var++, var--)
       if (variablePart.endsWith("++") || variablePart.endsWith("--")) {
         operator = variablePart.slice(-2);
         variablePart = variablePart.slice(0, -2);
       }
 
       if (operator) {
-        // Save current state
         const originalTokens = this.tokens;
         const originalPos = this.pos;
 
-        // Tokenize variablePart
         const newTokens = variablePart.match(Luz.tokensRegExp) || [];
         this.tokens = newTokens;
         this.pos = 0;
 
-        // Parse the variablePart as an l-value
         const lValue = this.tryParseLValue();
 
-        // Restore original state
         this.tokens = originalTokens;
         this.pos = originalPos;
 
@@ -2290,10 +2580,8 @@ export class Luz {
           };
         }
 
-        // Get current value
         const current = lValue.get();
 
-        // Check type
         if (typeof current !== "number" && typeof current !== "bigint") {
           throw {
             message: `Cannot apply postfix '${operator}' to non-numeric variable`,
@@ -2301,15 +2589,19 @@ export class Luz {
           };
         }
 
-        // Update value
-        const newValue =
-          operator === "++" ? (current as number) + 1 : (current as number) - 1;
+        let newValue: number | bigint;
+
+        if (typeof current === "number") {
+          newValue = operator === "++" ? current + 1 : current - 1;
+        } else {
+          newValue = operator === "++" ? current + 1n : current - 1n;
+        }
+
         lValue.set(newValue);
 
-        // Return original value (postfix)
         return current;
       } else {
-        // Existing variable handling...
+        //* Variable handling!
         if (!this.vars.has(tok)) {
           throw {
             message: `Variable '${tok}' is not defined`,
@@ -2318,10 +2610,27 @@ export class Luz {
         }
 
         let value = this.vars.get(tok).value;
-        while (this.peek() === "[") {
-          value = this.parseIndexAccess(value);
+        while (true) {
+          if (this.peek() === "[") {
+            value = this.parseIndexAccess(value);
+          } else if (this.peek() === ".") {
+            this.next(); // Consume the dot
+            const indexToken = this.next();
+            if (!this.isNumberToken(indexToken)) {
+              throw new Error("Expected number after dot for index access");
+            }
+            const index = Number(indexToken.replace(/_/g, ""));
+            value = this.getIndexValue(value, index);
+          } else {
+            break;
+          }
         }
         return value;
+        // let value = this.vars.get(tok).value;
+        // while (this.peek() === "[") {
+        //   value = this.parseIndexAccess(value);
+        // }
+        // return value;
       }
     }
     throw { message: `Unexpected token '${tok}'`, code: ExitCode.SystaxError };
@@ -2395,8 +2704,7 @@ export class Luz {
       throw { message: "Expected ']' after index", code: ExitCode.SystaxError };
     this.next();
 
-    // Handle range-based indexing
-    if (indexExpr instanceof Range || indexExpr instanceof XRange) {
+    if (indexExpr instanceof XRange || indexExpr instanceof Range) {
       const indices = Array.from(indexExpr.__value);
       let elements = [];
 
@@ -2417,7 +2725,7 @@ export class Luz {
         elements.push(getElement(Number(idx)));
       }
 
-      // Return appropriate type
+      //? return appropriate type
       if (typeof container === "string") {
         return elements.join("");
       }
@@ -2430,7 +2738,6 @@ export class Luz {
       return elements;
     }
 
-    // Handle single index access
     const idx = this.evalIndex(indexExpr, container);
 
     if (typeof container === "string") {
@@ -2440,10 +2747,10 @@ export class Luz {
     const values = container?.__value || container;
     return values[idx] ?? null;
   }
-  private evalIndex(indexExpr: any, container: any): number {
+  private evalIndex(indexExpr: any, _container: any): number {
     let indexValue = indexExpr;
 
-    if (indexExpr instanceof Range || indexExpr instanceof XRange) {
+    if (indexExpr instanceof XRange || indexExpr instanceof Range) {
       throw {
         message: "Range indices must be used directly in brackets",
         code: ExitCode.SemanticError,
@@ -2459,14 +2766,14 @@ export class Luz {
     }
 
     let idx = Number(indexValue);
-    const length =
-      typeof container === "string"
-        ? container.length
-        : container?.__value?.length || container.length;
+    // const length =
+    //   typeof container === "string"
+    //     ? container.length
+    //     : container?.__value?.length || container.length;
 
-    // Handle negative indices
-    if (idx < 0) idx += length;
-    return Math.max(0, Math.min(idx, length - 1));
+    // // Handle negative indices
+    // if (idx < 0) idx += length;
+    return idx;
   }
 
   private peek(offset: number = 0): string {
@@ -2499,7 +2806,7 @@ export class Luz {
       const { name, const: isConst, type } = el;
       let valBefore = el.value;
 
-      const value = this.formatValueDebug(valBefore);
+      const value = this.asDebugStr(valBefore);
 
       return {
         name,
@@ -2523,19 +2830,25 @@ export class Luz {
   private isLiteralToken(token: string): boolean {
     return (
       this.isNumberToken(token) ||
+      this.isExtraLong(token) ||
       this.isStrToken(token) ||
       this.isBooleanToken(token) ||
       this.isNullToken(token) ||
       this.isMaybeToken(token) ||
       this.isInfToken(token) ||
       token === "[" ||
-      token === "!["
+      token === "![" ||
+      token === "@{"
     );
   }
 
   private isNumberToken(token: string): boolean {
-    if (token === ".") return false;
-    return /^(?:\d|_)*\.?\d+$/.test(token);
+    // if (token === "." || /^.*_+$/g.test(token) || /^[e_]+/gi.test(token))
+    //   return false;
+    // if (/^(?:\d|_)*\.?\d+$/.test(token)) return true;
+    return /^(?<![\w\$áéíóúüñÁÉÍÓÚÜÑ]\.?)(?:\d(?:[\d_]*\.[\d_]*(?:e[-+]?\d+)?|\d*[\d_]*(?:e[-+]?\d+)?)|(?:\.[\d_]+(?:e[-+]?\d+)?))$/g.test(
+      token
+    );
   }
 
   private isStrToken(token: string): boolean {
@@ -2545,7 +2858,7 @@ export class Luz {
   }
 
   private isExtraLong(token: string): boolean {
-    return /^\d+xl$/gi.test(token);
+    return /^(?:\d|_)+xl$/gi.test(token);
   }
 
   private isBooleanToken(token: string): boolean {
@@ -2564,7 +2877,7 @@ export class Luz {
   }
 
   private isVariableToken(token: string): boolean {
-    return /^(?:\$|\w)+$/.test(token);
+    return /^[\w\$áéíóúüñÁÉÍÓÚÜÑ]+$/.test(token);
   }
 
   private isInfToken(token: string): boolean {
@@ -2641,7 +2954,7 @@ export class Luz {
 
             const expressionValue = this.parseExpression();
 
-            result += this.formatValue(expressionValue);
+            result += this.asStr(expressionValue);
           }
         } catch (error: any) {
           throw error;
