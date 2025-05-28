@@ -11,7 +11,7 @@
   },
   "private": true,
   "scripts": {
-    "start": "bun ./src/main.ts"
+    "start": "bun ."
   },
   "type": "module",
   "dependencies": {

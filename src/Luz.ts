@@ -1,7 +1,7 @@
 import psp from "prompt-sync";
 import fs from "fs";
 
-export interface LuzObj {
+export interface LuzConfig {
   vars?: Record<string, any>;
   expr: string;
 }
@@ -89,6 +89,7 @@ export class XRange {
 export const enum ExitCode {
   Success,
   Error,
+  IncorrectUsage, //? Reserved for CLI
   SystaxError,
   SemanticError,
   RuntimeError,
@@ -183,7 +184,7 @@ export class Luz {
   public static tokensRegExp: RegExp =
     /\bbreak\s*\r?\n|(?:\+\+|--)(?:\w|\$)+(?:\[[\s\S]*?\])*|(?:\w|\$)+(?:\[[\s\S]*?\])*(?:\+\+|--)|\?\?|<=>|,|\.\.=?|@\{|!\[|\*\*\=?|~\/=?|<<|>>>?|~|-=|[<>]?-[<>]?|(\d|_)+(?:X|x)(?:L|l)|(?:\d|_)*\.?\d+|(?:#|\/\/).*|\/\*[\s\S]*?\*\/|'[\s\S]*?(?<!\\)'|"[\s\S]*?(?<!\\)"|`[\s\S]*?(?<!\\)`|[=!\-+*<>%^?/]=?|[\w$]+|\.|\|\||[()\[\]{}%?:]|&&|[&|^]|(?<!(?:;|^));/g;
 
-  constructor({ vars, expr }: LuzObj) {
+  constructor({ vars, expr }: LuzConfig) {
     this.vars = vars
       ? new Map(
           Object.entries(vars).map((el: [string, LuzVar]) => {
