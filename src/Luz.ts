@@ -1,4 +1,3 @@
-// import psp from "prompt-sync";
 import fs from "fs";
 
 type Primitives = number | string | bigint | boolean | null;
@@ -219,6 +218,8 @@ export class Luz {
   public static tokensRegExp: RegExp =
     /\.\.\=?|(?:\+\+|--)[\w\$]+(?:\[[^\]]*?\]|\.[\w\$]+)*|[\w\$]+(?:\[[^\]]*?\]|\.[\w\$]+)*(?:\+\+|--)|\?\?|<=>|,|@\{|!\[|\*\*\=?|~\/=?|<<|>>>?|\.\.=?|~|-=|[<>]?-[<>]?|(?:\d|_)+[Xx][Ll]|(?<![\w\$]\.?)(?:\d(?:[\d_]*\.[\d_]+(?:[eE][-+]?\d+)?|\d*[\d_]*(?:[eE][-+]?\d+)?)|(?:\.[\d_]+(?:[eE][-+]?\d+)?))|(?:#|\/\/).*|\/\*[\s\S]*?\*\/|'[\s\S]*?(?<!\\)'|"[\s\S]*?(?<!\\)"|`[\s\S]*?(?<!\\)`|[=!\-+*<>%^?/]=?|[\w\$]+|\.|\|\||[()\[\]{}%?:]|&&|[&|^]|(?<!(?:;|^));/g;
 
+  public static isTTY = process.stdin.isTTY === true;
+
   constructor({
     vars,
     expr,
@@ -259,7 +260,6 @@ export class Luz {
     // this.expr = expr.replace(/\r/g, "");
     this.clearVarsOnEnd = clearVarsOnEnd;
     this.expr = expr;
- 
 
     this.logFn = logFn;
 
@@ -1878,9 +1878,9 @@ export class Luz {
     while (true) {
       const bytesRead = fs.readSync(0, buffer);
       if (bytesRead === 0) break; //? none!
-      
+
       const char = buffer.toString("utf8");
-      
+
       if (char === "\n") break;
       input += char;
     }
@@ -1978,7 +1978,7 @@ export class Luz {
     if (op === "get" || op === "getln") {
       this.next();
       const getInput = (promptText?: string): string => {
-          return this.readLineFromStdin(promptText ?? "");
+        return this.readLineFromStdin(promptText ?? "");
       };
 
       let prompt0 = "";
@@ -2001,9 +2001,12 @@ export class Luz {
         if (hasPrompt) this.logFn(prompt0);
 
         if (this.stdinStack.length > 0) {
+          const value = this.stdinStack.pop()!;
+          if (!Luz.isTTY) this.logFn(`${value ?? ""}`); //! Maybe we dont want this behavior
           if (hasPrompt) this.logFn("\n"); //! do a newline
-          return this.stdinStack.pop()!;
-        } else {
+
+          return value;
+        } else
           while (true) {
             const line = getInput();
             const tokens = line.trim().split(/\s+/);
@@ -2011,24 +2014,27 @@ export class Luz {
             if (tokens[0] === "") continue;
 
             this.stdinStack = tokens.slice(1).reverse();
+
+            if (!Luz.isTTY) this.logFn(`${tokens[0] ?? ""}\n`);
+
             return tokens[0] ?? "";
           }
-        }
       }
     }
     if (op === "lenof") {
       this.next();
       const rhs = this.parsePrimary(); //!
 
-      if (typeof rhs === "string") {
-        return rhs.length;
-      } else if (rhs && typeof rhs === "object" && "__value" in rhs) {
+      if (rhs instanceof XRange) return Math.abs(rhs.end - rhs.start);
+      else if (rhs instanceof Range) return Math.abs(rhs.end - rhs.start) + 1;
+
+      if (typeof rhs === "string") return rhs.length;
+      else if (rhs && typeof rhs === "object" && "__value" in rhs) {
         if (rhs.__type === "vec" || rhs.__type === "arr")
           return rhs.__value.length;
         else if (rhs.__type === "set") return rhs.__value.size;
-      } else if (Array.isArray(rhs)) {
-        return rhs.length;
-      } else {
+      } else if (Array.isArray(rhs)) return rhs.length;
+      else {
         throw {
           message: `lenof not supported for ${typeof rhs}`,
           code: ExitCode.SemanticError,

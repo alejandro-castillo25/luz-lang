@@ -1,5 +1,7 @@
 # Luz
 
+Luz is an interpreted programming language (with no previous optimizations so far)
+
 To install dependencies:
 
 ```bash
@@ -21,10 +23,10 @@ parseExpression
 |> parseAssignment // =, +=, ...
     |> parseRange   // .. ..=
         |> parseLogicalOr   // ||
-            |> parseNullish   // ||
+            |> parseNullish   // ??
                 |> parseLogicalAnd  // &&
-                    |> parseEquality() // ==, !=
-                        |> parseComparision() // <. >, <=, >=
+                    |> parseEquality // ==, !=
+                        |> parseComparision // <. >, <=, >=
                             |> parseAddSub    // +, -
                                 |> parseMulDiv // *, /, %. ~/
                                     |> parsePow // **
@@ -34,6 +36,6 @@ parseExpression
                                                     |> parsePostfix // ++/--
                                                         |> parseIfExpression // if, else
                                                             |> parseLoopExpression // loop
-                                                                |> parsePrimary //literals, vars, (), ...
+                                                                |> parsePrimary // literals, vars, (), ...
 
 </pre>

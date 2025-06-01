@@ -2,6 +2,8 @@ import { stdout } from "process";
 import { Luz } from "./src/Luz";
 import fs from "fs";
 
+
+
 let debugFlag = true;
 
 const name = "main.luz";
