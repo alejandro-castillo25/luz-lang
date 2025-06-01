@@ -1978,10 +1978,7 @@ export class Luz {
     if (op === "get" || op === "getln") {
       this.next();
       const getInput = (promptText?: string): string => {
-          return this.readLineFromStdin(promptText ?? "") ?? "";
-          // return this.rl.question(promptText ?? "") ?? "";
-          // return rl.question(promptText ?? "") ?? "";
-
+          return this.readLineFromStdin(promptText ?? "");
       };
 
       let prompt0 = "";
@@ -2009,8 +2006,6 @@ export class Luz {
         } else {
           while (true) {
             const line = getInput();
-
-      
             const tokens = line.trim().split(/\s+/);
 
             if (tokens[0] === "") continue;
