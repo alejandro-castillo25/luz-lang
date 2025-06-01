@@ -1,16 +1,12 @@
-import psp from "prompt-sync";
+// import psp from "prompt-sync";
 import fs from "fs";
 
-export interface LuzConfig {
-  vars?: Record<string, any>;
-  expr: string;
-  clearVarsOnEnd?: boolean;
-}
+type Primitives = number | string | bigint | boolean | null;
 
 interface LuzVar {
-  value: any;
-  type?: (typeof Luz.TYPES)[number];
-  const?: true;
+  value: Primitives | StructType;
+  type: (typeof Luz.TYPES)[number];
+  const?: boolean;
 }
 
 export type LuzVars = Map<string, any>;
@@ -112,14 +108,37 @@ export const enum ExitCode {
 
 export class BreakSignal extends Error {
   constructor(public value: any) {
-    super("Break statement");
+    super("Break expression");
+  }
+}
+
+export class ReturnSignal extends Error {
+  constructor(public value: any) {
+    super("Return expression");
   }
 }
 
 export class ContinueSignal extends Error {
   constructor() {
-    super("Continue statement");
+    super("Continue expression");
   }
+}
+
+interface OnMethods {
+  onEnd: (code: number) => any;
+  onStart: () => any;
+  onSuccess: () => any;
+  onError: (code: number) => any;
+}
+
+export interface LuzConfig extends Partial<OnMethods> {
+  vars?:
+    | Record<string, LuzVar>
+    | Array<{ name: string } & Omit<LuzVar, "name">>;
+  expr: string;
+  clearVarsOnEnd?: boolean;
+
+  logFn?: (arg0: string) => any;
 }
 
 export class Luz {
@@ -129,16 +148,26 @@ export class Luz {
 
   private tokens: string[] = [];
   private pos = 0;
-  private rl = psp({
-    sigint: true,
-  });
+
   private isSkipping: boolean = false;
 
-  private clearVarsOnEnd: boolean = false;
+  private clearVarsOnEnd: boolean;
 
   // private isBrowserEnvironment = "window" in globalThis && !("process" in globalThis);
 
-  private pipeStdin: string[] | null = null;
+  private logFn: NonNullable<LuzConfig["logFn"]>;
+
+  //TODO consider fremoving this, prompt already handles this
+  // private pipeStdin: string[] | null = null;
+
+  // private input = psp({sigint: true})
+
+  private stdinStack: Array<string> = [];
+
+  private onEnd: OnMethods["onEnd"];
+  private onStart: OnMethods["onStart"];
+  private onSuccess: OnMethods["onSuccess"];
+  private onError: OnMethods["onError"];
 
   public static KEYWORDS = [
     // "this",
@@ -168,6 +197,7 @@ export class Luz {
     "log",
     "logln",
     "get",
+    "getln",
   ] as const;
 
   public static TYPES = [
@@ -185,52 +215,65 @@ export class Luz {
     "xran",
   ] as const;
 
-  //* Original!
-  // public static tokensRegExp: RegExp =
-  //   /\?\?|<=>|\,|\.\.\=?|\@\{|!\[|\*\*\=?|~\/\=?|<<|>>>?|~|-(?:-|=)|[<>]?\-[<>]?|\+\+|(\d|_)+XL|(?:\d|_)*\.?\d+|(?:#|\/\/).*|\/\*(?:.|\n|\r)*?\*\/|\'(?:.|\n|\r)*?(?<!\\)\'|\"(?:.|\n|\r)*?(?<!\\)\"|\`(?:.|\n|\r)*?(?<!\\)\`|(?:[=!\-\+*<>%\^\?]|\/\/?)\=?|[\$\w]+|\.|\|\||[\(\)\[\]\{\}%\?:]|\&\&|[&|^]|(?<!(?:;|^));/gi;
-
-  //? New one but old
-  // public static tokensRegExp: RegExp =
-  //   /\?\?|<=>|,|\.\.=?|@\{|!\[|\*\*\=?|~\/=?|<<|>>>?|~|-(?:-|=)|[<>]?-[<>]?|\+\+|(\d|_)+XL|(?:\d|_)*\.?\d+|(?:#|\/\/).*|\/\*[\s\S]*?\*\/|'[\s\S]*?(?<!\\)'|"[\s\S]*?(?<!\\)"|`[\s\S]*?(?<!\\)`|[=!\-+*<>%^?/]=?|[\w$]+|\.|\|\||[()\[\]{}%?:]|&&|[&|^]|(?<!(?:;|^));/gi;
-
   //? Emojis: (\u00a9|\u00ae|[\u2000-\u3300]|\ud83c[\ud000-\udfff]|\ud83d[\ud000-\udfff]|\ud83e[\ud000-\udfff])
-  //! (?<=[\w\$\]])\.)
   public static tokensRegExp: RegExp =
-    /(?:\+\+|--)[\w\$áéíóúüñÁÉÍÓÚÜÑ]+(?:\[[^\]]*?\]|\.[\w\$áéíóúüñÁÉÍÓÚÜÑ]+)*|[\w\$áéíóúüñÁÉÍÓÚÜÑ]+(?:\[[^\]]*?\]|\.[\w\$áéíóúüñÁÉÍÓÚÜÑ]+)*(?:\+\+|--)|\?\?|<=>|,|\.\.=?|@\{|!\[|\*\*\=?|~\/=?|<<|>>>?|~|-=|[<>]?-[<>]?|(?:\d|_)+[Xx][Ll]|(?<![\w\$áéíóúüñÁÉÍÓÚÜÑ]\.?)(?:\d(?:[\d_]*\.[\d_]*(?:e[-+]?\d+)?|\d*[\d_]*(?:e[-+]?\d+)?)|(?:\.[\d_]+(?:e[-+]?\d+)?))|(?:#|\/\/).*|\/\*[\s\S]*?\*\/|'[\s\S]*?(?<!\\)'|"[\s\S]*?(?<!\\)"|`[\s\S]*?(?<!\\)`|[=!\-+*<>%^?/]=?|[\w\$áéíóúüñÁÉÍÓÚÜÑ]+|\.|\|\||[()\[\]{}%?:]|&&|[&|^]|(?<!(?:;|^));/g;
+    /\.\.\=?|(?:\+\+|--)[\w\$]+(?:\[[^\]]*?\]|\.[\w\$]+)*|[\w\$]+(?:\[[^\]]*?\]|\.[\w\$]+)*(?:\+\+|--)|\?\?|<=>|,|@\{|!\[|\*\*\=?|~\/=?|<<|>>>?|\.\.=?|~|-=|[<>]?-[<>]?|(?:\d|_)+[Xx][Ll]|(?<![\w\$]\.?)(?:\d(?:[\d_]*\.[\d_]+(?:[eE][-+]?\d+)?|\d*[\d_]*(?:[eE][-+]?\d+)?)|(?:\.[\d_]+(?:[eE][-+]?\d+)?))|(?:#|\/\/).*|\/\*[\s\S]*?\*\/|'[\s\S]*?(?<!\\)'|"[\s\S]*?(?<!\\)"|`[\s\S]*?(?<!\\)`|[=!\-+*<>%^?/]=?|[\w\$]+|\.|\|\||[()\[\]{}%?:]|&&|[&|^]|(?<!(?:;|^));/g;
 
-  //*   /(?:\+\+|--)[\w\$áéíóúüñÁÉÍÓÚÜÑ]+(?:\[[^\]]*?\]|\.[\w\$áéíóúüñÁÉÍÓÚÜÑ]+)*|[\w\$áéíóúüñÁÉÍÓÚÜÑ]+(?:\[[^\]]*?\]|\.[\w\$áéíóúüñÁÉÍÓÚÜÑ]+)*(?:\+\+|--)|\?\?|<=>|,|\.\.=?|@\{|!\[|\*\*\=?|~\/=?|<<|>>>?|~|-=|[<>]?-[<>]?|(?:\d|_)+[Xx][Ll]|(?<![\w\$áéíóúüñÁÉÍÓÚÜÑ]\.?)(?=.*\d)(?:\d|_|e)*-?\.?(?:\d|_|e)+-?(?:\d|_)*|(?:#|\/\/).*|\/\*[\s\S]*?\*\/|'[\s\S]*?(?<!\\)'|"[\s\S]*?(?<!\\)"|`[\s\S]*?(?<!\\)`|[=!\-+*<>%^?/]=?|[\w\$áéíóúüñÁÉÍÓÚÜÑ]+|\.|\|\||[()\[\]{}%?:]|&&|[&|^]|(?<!(?:;|^));/g;
-  constructor({ vars, expr, clearVarsOnEnd = false }: LuzConfig) {
-    this.vars = vars
-      ? new Map(
-          Object.entries(vars).map((el: [string, LuzVar]) => {
-            const value = el[1].value;
-            const type = el[1].type;
-
-            const lusVar = {
-              value,
-              type,
-            } as LuzVar;
-
-            if ("const" in el[1]) lusVar.const = true;
-
-            return [el[0], lusVar];
-          })
-        )
-      : new Map();
+  constructor({
+    vars,
+    expr,
+    clearVarsOnEnd = false,
+    onEnd = () => {},
+    onStart = () => {},
+    onError = () => {},
+    onSuccess = () => {},
+    logFn = console.log,
+  }: LuzConfig) {
+    if (vars) {
+      if (Array.isArray(vars)) {
+        this.vars = new Map(
+          vars.map((item) => [
+            item.name,
+            {
+              value: item.value,
+              type: item.type,
+              const: item.const ?? false,
+            } as LuzVar,
+          ])
+        );
+      } else {
+        // Record format: { a: { value: ..., type: ..., const: ... }, ... }
+        this.vars = new Map(
+          Object.entries(vars).map(([name, varData]) => [
+            name,
+            {
+              value: varData.value,
+              type: varData.type,
+              const: varData.const ?? false,
+            } as LuzVar,
+          ])
+        );
+      }
+    } else this.vars = new Map();
 
     // this.expr = expr.replace(/\r/g, "");
     this.clearVarsOnEnd = clearVarsOnEnd;
     this.expr = expr;
-    this.pipeStdin =
-      process.stdin.isTTY === true
-        ? null
-        : fs.readFileSync(0, "utf-8").split(/\n/g);
+ 
+
+    this.logFn = logFn;
+
+    this.onStart = onStart;
+    this.onEnd = onEnd;
+    this.onSuccess = onSuccess;
+    this.onError = onError;
   }
 
   public run(): number {
     this.tokens = this.expr.match(Luz.tokensRegExp) ?? [];
-
     this.pos = 0;
+    let code = 0;
+    this.onStart();
 
     try {
       while (this.pos < this.tokens.length) {
@@ -241,9 +284,15 @@ export class Luz {
       if (err instanceof BreakSignal) {
         throw err;
       }
+      code = err.code;
       console.error(err.message);
       return err.code ?? ExitCode.RuntimeError;
     } finally {
+      if (code === 0) this.onSuccess();
+      else this.onError(code);
+
+      this.onEnd(code);
+
       if (this.clearVarsOnEnd) this.clearVars();
     }
   }
@@ -430,9 +479,13 @@ export class Luz {
       return result;
     }
 
-    // ? Known loop variant
-    const hasParen = this.peek() === "(";
-    if (hasParen) this.next();
+    const savedPos = this.pos;
+    let hasParen = false;
+
+    if (this.peek() === "(") {
+      hasParen = true;
+      this.next();
+    }
 
     let loopVariable: string | null = null;
     let iterable: any;
@@ -444,21 +497,35 @@ export class Luz {
       loopVariable = this.next();
       this.next(); // in
       iterable = this.parseExpression();
-      if (hasParen) this.expect(")", "for-in expression");
+
+      if (hasParen) {
+        if (this.peek() !== ")") {
+          throw {
+            message: "Expected ')' after for-in expression",
+            code: ExitCode.SystaxError,
+          };
+        }
+        this.next();
+      }
     } else {
+      //? in wasnt found!
+      if (hasParen) {
+        this.pos = savedPos;
+      }
+
       //* While loop
       conditionStart = this.pos;
       let depth = 0;
       while (this.pos < this.tokens.length) {
         const token = this.peek();
-        if (hasParen && token === ")" && depth === 0) break;
-        if (!hasParen && token === "{") break;
+        if (token === "{" && depth === 0) {
+          break;
+        }
+        this.next();
         if (["(", "[", "{"].includes(token)) depth++;
         if ([")", "]", "}"].includes(token)) depth--;
-        this.next();
       }
       conditionEnd = this.pos - 1;
-      if (hasParen) this.expect(")", "loop condition");
     }
 
     //? body
@@ -468,7 +535,7 @@ export class Luz {
     //? Run loop!
     if (loopVariable !== null) {
       const result = this.executeForInLoop(loopVariable, iterable, loopBody);
-      this.pos = loopBody.end + 1; //?  } ->
+      this.pos = loopBody.end + 1;
       return result;
     } else {
       const result = this.executeWhileLoop(
@@ -476,7 +543,7 @@ export class Luz {
         conditionEnd!,
         loopBody
       );
-      this.pos = loopBody.end + 1; //? getto after }
+      this.pos = loopBody.end + 1;
       return result;
     }
   }
@@ -606,7 +673,11 @@ export class Luz {
     this.next();
   }
 
-  private tryParseLValue(): { get: () => any; set: (v: any) => void; delete: () => any } | null {
+  private tryParseLValue(): {
+    get: () => any;
+    set: (v: any) => void;
+    delete: () => any;
+  } | null {
     const initialState = { pos: this.pos, vars: new Map(this.vars) };
     let varName: string | null = null;
     const indices: any[] = [];
@@ -1024,19 +1095,17 @@ export class Luz {
 
       varName = this.next();
 
-      if (this.isLiteralToken(varName)) {
+      if (this.isLiteralToken(varName))
         throw {
-          message: `Cannot assign to literal!`,
+          message: `Cannot assign to literal`,
           code: ExitCode.SemanticError,
         };
-      }
 
-      if (Luz.KEYWORDS.includes(varName as any)) {
+      if (Luz.KEYWORDS.includes(varName as any))
         throw {
-          message: `Cannot assign to ${varName} because it is a keyword!`,
+          message: `Cannot assign to '${varName}' because it is a keyword`,
           code: ExitCode.SemanticError,
         };
-      }
 
       while (this.peek() === "[" || this.peek() === ".") {
         if (this.peek() === "[") {
@@ -1800,6 +1869,24 @@ export class Luz {
     }
   }
 
+  private readLineFromStdin(prompt?: string): string {
+    if (prompt) {
+      process.stdout.write(prompt);
+    }
+    const buffer = Buffer.alloc(1);
+    let input = "";
+    while (true) {
+      const bytesRead = fs.readSync(0, buffer);
+      if (bytesRead === 0) break; //? none!
+      
+      const char = buffer.toString("utf8");
+      
+      if (char === "\n") break;
+      input += char;
+    }
+    return input;
+  }
+
   private parseUnary(): any {
     const currentToken = this.peek();
 
@@ -1873,46 +1960,67 @@ export class Luz {
     if (op === "log" || op === "logln") {
       this.next();
 
-      if (";})([]".includes(this.peek())) {
-        if (op === "log") process.stdout.write("");
-        else console.log("");
+      if (";})]".includes(this.peek())) {
+        if (op === "log") this.logFn("");
+        else this.logFn("\n");
+
         return "";
       }
 
       const rhs = this.parseExpression();
-
       const out = this.asStr(rhs);
 
-      if (op === "log") process.stdout.write(out);
-      else console.log(out);
+      if (op === "log") this.logFn(out);
+      else this.logFn(`${out}\n`);
       return out;
     }
 
-    if (op === "get") {
+    if (op === "get" || op === "getln") {
+      this.next();
       const getInput = (promptText?: string): string => {
-        if (this.pipeStdin === null) return this.rl(promptText ?? "");
-        // return prompt(promptText ?? "") ?? "" //! it uses an extra space so no for now!
+          return this.readLineFromStdin(promptText ?? "") ?? "";
+          // return this.rl.question(promptText ?? "") ?? "";
+          // return rl.question(promptText ?? "") ?? "";
 
-        const data = this.pipeStdin.shift();
-        return data ?? "";
       };
 
-      this.next();
-
-      if (";})],{".includes(this.peek())) return getInput();
-
+      let prompt0 = "";
+      let hasPrompt = false;
       if (
-        //! "get"?
-        ["==", "!=", "as", "+", "get", "", "loop", "if"].includes(this.peek())
-      )
+        ![";", "}", "]", ")", "", "as", "get", "getln", "==", "!="].includes(
+          this.peek()
+        )
+      ) {
+        const promptArg = this.parsePrimary();
+        prompt0 = this.asStr(promptArg);
+        hasPrompt = true;
+      }
+
+      if (op === "getln") {
+        if (hasPrompt) this.logFn(prompt0);
+
         return getInput();
+      } else {
+        if (hasPrompt) this.logFn(prompt0);
 
-      const promptArg = this.parsePrimary();
-      const pro = this.asStr(promptArg); //? maybeeee
+        if (this.stdinStack.length > 0) {
+          if (hasPrompt) this.logFn("\n"); //! do a newline
+          return this.stdinStack.pop()!;
+        } else {
+          while (true) {
+            const line = getInput();
 
-      return getInput(pro);
+      
+            const tokens = line.trim().split(/\s+/);
+
+            if (tokens[0] === "") continue;
+
+            this.stdinStack = tokens.slice(1).reverse();
+            return tokens[0] ?? "";
+          }
+        }
+      }
     }
-
     if (op === "lenof") {
       this.next();
       const rhs = this.parsePrimary(); //!
@@ -2846,7 +2954,7 @@ export class Luz {
     // if (token === "." || /^.*_+$/g.test(token) || /^[e_]+/gi.test(token))
     //   return false;
     // if (/^(?:\d|_)*\.?\d+$/.test(token)) return true;
-    return /^(?<![\w\$áéíóúüñÁÉÍÓÚÜÑ]\.?)(?:\d(?:[\d_]*\.[\d_]*(?:e[-+]?\d+)?|\d*[\d_]*(?:e[-+]?\d+)?)|(?:\.[\d_]+(?:e[-+]?\d+)?))$/g.test(
+    return /^(?<![\w\$]\.?)(?:\d(?:[\d_]*\.[\d_]+(?:[eE][-+]?\d+)?|\d*[\d_]*(?:[eE][-+]?\d+)?)|(?:\.[\d_]+(?:[eE][-+]?\d+)?))$/g.test(
       token
     );
   }

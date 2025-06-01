@@ -1,10 +1,9 @@
 {
   "name": "luz-lang",
-  "module": "index.ts",
   "version": "0.0.1",
+  "module": "index.ts",
   "devDependencies": {
-    "@types/bun": "latest",
-    "@types/prompt-sync": "^4.2.3"
+    "@types/bun": "latest"
   },
   "peerDependencies": {
     "typescript": "^5"
@@ -13,10 +12,5 @@
   "scripts": {
     "start": "bun ."
   },
-  "type": "module",
-  "dependencies": {
-    "prompt-sync": "^4.2.0",
-    "prompt-sync-plus": "^1.0.2",
-    "wait-console-input": "^0.1.7"
-  }
+  "type": "module"
 }
