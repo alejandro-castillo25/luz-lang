@@ -413,6 +413,7 @@ export class Luz {
       ? obj.__value
       : obj;
   }
+
   private checkHas(left: any, right: any): boolean {
     if (left === null || left === undefined) return false;
 
@@ -1093,13 +1094,16 @@ export class Luz {
       this.pos = initialState.pos;
       this.vars = new Map(initialState.vars);
 
-      varName = this.next();
 
-      if (this.isLiteralToken(varName))
+      if (this.isLiteralToken(this.peek()))
         throw {
-          message: `Cannot assign to literal`,
+          message: `Cannot assign to literal '${this.asDebugStr(this.parsePrimary())}'`,
           code: ExitCode.SemanticError,
         };
+
+      varName = this.next();
+
+     
 
       if (Luz.KEYWORDS.includes(varName as any))
         throw {
@@ -1870,9 +1874,8 @@ export class Luz {
   }
 
   private readLineFromStdin(prompt?: string): string {
-    if (prompt) {
-      process.stdout.write(prompt);
-    }
+    if (prompt) process.stdout.write(prompt);
+
     const buffer = Buffer.alloc(1);
     let input = "";
     while (true) {
@@ -1990,7 +1993,8 @@ export class Luz {
       ) {
         const promptArg = this.parsePrimary();
         prompt0 = this.asStr(promptArg);
-        hasPrompt = true;
+        //! "" is considered as no prompt!
+        hasPrompt = prompt0 !== "";
       }
 
       if (op === "getln") {
@@ -2002,8 +2006,14 @@ export class Luz {
 
         if (this.stdinStack.length > 0) {
           const value = this.stdinStack.pop()!;
-          if (!Luz.isTTY) this.logFn(`${value ?? ""}`); //! Maybe we dont want this behavior
-          if (hasPrompt) this.logFn("\n"); //! do a newline
+          if (hasPrompt) {
+            if (!Luz.isTTY)
+              this.logFn(
+                `${value ?? ""}\n`
+              ); //! Maybe we dont want this behavior
+            else this.logFn("\n");
+          }
+          // if (hasPrompt) this.logFn("\n"); //! do a newline
 
           return value;
         } else
@@ -2015,7 +2025,7 @@ export class Luz {
 
             this.stdinStack = tokens.slice(1).reverse();
 
-            if (!Luz.isTTY) this.logFn(`${tokens[0] ?? ""}\n`);
+            if (!Luz.isTTY && hasPrompt) this.logFn(`${tokens[0] ?? ""}\n`);
 
             return tokens[0] ?? "";
           }
@@ -2149,6 +2159,14 @@ export class Luz {
 
     if (op === "del") {
       this.next();
+
+      if (this.isLiteralToken(this.peek()))
+        throw {
+          message: `Cannot delete a literal '${this.asDebugStr(
+            this.parsePrimary()
+          )}'`,
+          code: ExitCode.SemanticError,
+        };
 
       if (this.peek() === "*") {
         this.next();
