@@ -38,3 +38,5 @@ src/*.luz
 *.luz
 out.txt
 in.txt
+proposal.txt
+*.exe

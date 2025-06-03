@@ -1,6 +1,6 @@
 {
   "name": "luz-lang",
-  "version": "0.0.1",
+  "version": "0.4.1",
   "module": "index.ts",
   "devDependencies": {
     "@types/bun": "latest"
@@ -12,5 +12,8 @@
   "scripts": {
     "start": "bun ."
   },
-  "type": "module"
+  "type": "module",
+  "dependencies": {
+    "commander": "^14.0.0"
+  }
 }

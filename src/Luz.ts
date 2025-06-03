@@ -98,6 +98,7 @@ export const enum ExitCode {
   SemanticError,
   RuntimeError,
   FileNotFound,
+  InvalidFilePath,
   PermissionDenied,
   InvalidInstruction,
   OutOfMemory,
@@ -276,14 +277,14 @@ export class Luz {
     this.onStart();
 
     try {
-      while (this.pos < this.tokens.length) {
+      while (this.pos < this.tokens.length) 
         this.parseStatement();
-      }
+      
       return ExitCode.Success;
     } catch (err: any) {
-      if (err instanceof BreakSignal) {
+      if (err instanceof BreakSignal) 
         throw err;
-      }
+      
       code = err.code;
       console.error(err.message);
       return err.code ?? ExitCode.RuntimeError;
@@ -357,9 +358,9 @@ export class Luz {
       this.pos = startPos;
       this.vars = new Map(initialState.vars);
 
-      if (e.code === ExitCode.SemanticError) {
+      if (e.code === ExitCode.SemanticError)
         throw e;
-      }
+      
 
       return null;
     }
@@ -500,28 +501,28 @@ export class Luz {
       iterable = this.parseExpression();
 
       if (hasParen) {
-        if (this.peek() !== ")") {
+        if (this.peek() !== ")") 
           throw {
             message: "Expected ')' after for-in expression",
             code: ExitCode.SystaxError,
           };
-        }
+        
         this.next();
       }
     } else {
       //? in wasnt found!
-      if (hasParen) {
+      if (hasParen) 
         this.pos = savedPos;
-      }
+      
 
       //* While loop
       conditionStart = this.pos;
       let depth = 0;
       while (this.pos < this.tokens.length) {
         const token = this.peek();
-        if (token === "{" && depth === 0) {
+        if (token === "{" && depth === 0) 
           break;
-        }
+        
         this.next();
         if (["(", "[", "{"].includes(token)) depth++;
         if ([")", "]", "}"].includes(token)) depth--;
@@ -554,7 +555,7 @@ export class Luz {
     const loopBody = this.parseLoopBody();
     let result: any = null;
 
-    while (true) {
+    while (true) 
       try {
         this.pos = loopBody.start;
         result = this.executeLoopBody(loopBody);
@@ -565,7 +566,7 @@ export class Luz {
         }
         throw e;
       }
-    }
+    
 
     this.pos = loopBody.end + 1; //? } ->
     return result;
@@ -598,9 +599,9 @@ export class Luz {
         if (e instanceof BreakSignal) {
           result = e.value;
           break;
-        } else if (e instanceof ContinueSignal) {
+        } else if (e instanceof ContinueSignal) 
           continue;
-        }
+        
         throw e;
       }
     }
@@ -621,12 +622,12 @@ export class Luz {
       const condition = this.parseExpression();
 
       //? check: we consumed condition tokens
-      if (this.pos !== conditionEnd + 1) {
+      if (this.pos !== conditionEnd + 1) 
         throw {
           message: "Condition parsing length mismatch",
           code: ExitCode.SystaxError,
         };
-      }
+      
 
       this.pos = originalPos;
 
@@ -638,9 +639,9 @@ export class Luz {
         if (e instanceof BreakSignal) {
           result = e.value;
           break;
-        } else if (e instanceof ContinueSignal) {
+        } else if (e instanceof ContinueSignal) 
           continue;
-        }
+        
         throw e;
       }
     }
@@ -652,9 +653,9 @@ export class Luz {
     let result: any = null;
     this.pos = body.start;
     try {
-      while (this.pos < body.end) {
+      while (this.pos < body.end) 
         result = this.parseStatement();
-      }
+      
     } finally {
       //? Clean up!
       Array.from(this.vars.keys())
@@ -665,12 +666,12 @@ export class Luz {
   }
 
   private expect(token: string, context: string) {
-    if (this.peek() !== token) {
+    if (this.peek() !== token) 
       throw {
         message: `Expected '${token}' in ${context}`,
         code: ExitCode.SystaxError,
       };
-    }
+    
     this.next();
   }
 
@@ -681,7 +682,7 @@ export class Luz {
   } | null {
     const initialState = { pos: this.pos, vars: new Map(this.vars) };
     let varName: string | null = null;
-    const indices: any[] = [];
+    const indices: Array<any> = [];
 
     try {
       if (!this.isVariableToken(this.peek())) return null;
@@ -698,25 +699,25 @@ export class Luz {
         } else if (this.peek() === ".") {
           this.next();
           const indexToken = this.next();
-          if (!this.isNumberToken(indexToken)) {
+          if (!this.isNumberToken(indexToken)) 
             throw new Error("Expected number after dot for index access");
-          }
+          
           const index = Number(indexToken.replace(/_/g, ""));
           indices.push(index);
         }
       }
 
-      if (!this.vars.has(varName)) {
+      if (!this.vars.has(varName)) 
         throw new Error(`Undefined variable '${varName}'`);
-      }
+      
 
       const varData = this.vars.get(varName)!;
-      if (varData.const) {
+      if (varData.const) 
         throw {
           message: `Cannot modify constant '${varName}'`,
           code: ExitCode.SemanticError,
         };
-      }
+      
 
       return {
         get: () => {
@@ -728,31 +729,31 @@ export class Luz {
               typeof value === "object" &&
               "__value" in value &&
               Array.isArray(value.__value)
-            ) {
+            )
               value = value.__value[idx];
-            } else if (Array.isArray(value)) {
+            else if (Array.isArray(value)) 
               value = value[idx];
-            } else {
+            else 
               throw {
                 message: `Cannot access index of non-array type for ${varName}`,
                 code: ExitCode.SemanticError,
               };
-            }
+            
           }
           return value;
         },
         set: (newValue: any) => {
           const currentVarData = this.vars.get(varName!)!;
-          if (currentVarData.const) {
+          if (currentVarData.const) 
             throw {
               message: `Cannot modify constant '${varName}'`,
               code: ExitCode.SemanticError,
             };
-          }
+          
 
-          if (indices.length === 0) {
+          if (indices.length === 0) 
             currentVarData.value = newValue;
-          } else {
+          else {
             let container = currentVarData.value;
             const resolvedIndices = [];
             for (const indexExpr of indices) {
@@ -763,31 +764,31 @@ export class Luz {
                   container &&
                   typeof container === "object" &&
                   "__value" in container
-                ) {
+                ) 
                   container = container.__value[idx!];
-                } else if (Array.isArray(container)) {
+                 else if (Array.isArray(container)) 
                   container = container[idx!];
-                } else {
+                 else 
                   throw {
                     message: `Cannot access index of non-array type for ${varName}`,
                     code: ExitCode.SemanticError,
                   };
-                }
+                
               }
             }
 
             let parent = currentVarData.value;
             for (let i = 0; i < resolvedIndices.length - 1; i++) {
-              if (parent && typeof parent === "object" && "__value" in parent) {
+              if (parent && typeof parent === "object" && "__value" in parent) 
                 parent = parent.__value[resolvedIndices[i]!];
-              } else if (Array.isArray(parent)) {
+              else if (Array.isArray(parent))
                 parent = parent[resolvedIndices[i]!];
-              } else {
+              else 
                 throw {
                   message: `Cannot access index of non-array type for ${varName}`,
                   code: ExitCode.SemanticError,
                 };
-              }
+              
             }
             const lastIdx = resolvedIndices[resolvedIndices.length - 1];
             if (
@@ -795,25 +796,25 @@ export class Luz {
               typeof parent === "object" &&
               "__value" in parent &&
               Array.isArray(parent.__value)
-            ) {
+            ) 
               parent.__value[lastIdx!] = newValue;
-            } else if (Array.isArray(parent)) {
+             else if (Array.isArray(parent)) 
               parent[lastIdx!] = newValue;
-            } else {
+             else 
               throw {
                 message: `Cannot set index of non-array type for ${varName}`,
                 code: ExitCode.SemanticError,
               };
-            }
+            
           }
         },
         delete: () => {
           const currentVarData = this.vars.get(varName!)!;
 
-          if (indices.length === 0) {
+          if (indices.length === 0)
             // Delete entire variable
             this.vars.delete(varName!);
-          } else {
+          else {
             // Delete element from container
             let container = currentVarData.value;
             const resolvedIndices = [];
@@ -827,16 +828,16 @@ export class Luz {
                 container &&
                 typeof container === "object" &&
                 "__value" in container
-              ) {
+              ) 
                 container = container.__value[idx];
-              } else if (Array.isArray(container)) {
+               else if (Array.isArray(container)) 
                 container = container[idx];
-              } else {
+              else 
                 throw {
                   message: `Cannot access index of non-array type for ${varName}`,
                   code: ExitCode.SemanticError,
                 };
-              }
+              
             }
 
             const lastIdx = this.evalIndex(
@@ -850,29 +851,29 @@ export class Luz {
               typeof container === "object" &&
               "__value" in container
             ) {
-              if (container.__type === "arr") {
+              if (container.__type === "arr") 
                 throw {
                   message: `Cannot delete from fixed-size array`,
                   code: ExitCode.SemanticError,
                 };
-              } else if (container.__type === "vec") {
+              else if (container.__type === "vec") 
                 // Perform vector deletion
                 container.__value.splice(lastIdx, 1);
-              } else {
+              else 
                 throw {
                   message: `Delete operation not supported for ${container.__type}`,
                   code: ExitCode.SemanticError,
                 };
-              }
-            } else if (Array.isArray(container)) {
+              
+            } else if (Array.isArray(container)) 
               // Handle plain JS arrays
               container.splice(lastIdx, 1);
-            } else {
+            else 
               throw {
                 message: `Cannot delete from non-array type`,
                 code: ExitCode.SemanticError,
               };
-            }
+            
           }
         },
       };
@@ -880,9 +881,9 @@ export class Luz {
       this.pos = initialState.pos;
       this.vars = new Map(initialState.vars);
 
-      if (e && e.code === ExitCode.SemanticError) {
+      if (e && e.code === ExitCode.SemanticError) 
         throw e;
-      }
+      
       return null;
     }
   }
@@ -896,12 +897,12 @@ export class Luz {
     if (iterable !== null && typeof iterable === "object") {
       if ("__type" in iterable) {
         const type = iterable.__type;
-        if (type === "arr" || type === "vec") {
+        if (type === "arr" || type === "vec") 
           return iterable.__value;
-        }
-      } else if (Array.isArray(iterable)) {
+        
+      } else if (Array.isArray(iterable)) 
         return iterable;
-      }
+      
     }
 
     throw {
@@ -914,9 +915,9 @@ export class Luz {
     this.next();
     let value = null;
 
-    if (![";", "}", ""].includes(this.peek())) {
+    if (![";", "}", ""].includes(this.peek()))
       value = this.parseExpression();
-    }
+    
 
     if (this.peek() === ";") this.next();
     throw new BreakSignal(value);
@@ -929,34 +930,34 @@ export class Luz {
     let thenValue: any = null;
     let elseValue: any = null;
 
-    if (this.peek() !== "{") {
+    if (this.peek() !== "{")
       throw {
         message: "Expected '{' after 'if' condition",
         code: ExitCode.SystaxError,
       };
-    }
+    
 
     if (cond) {
       thenValue = this.parseBlock();
 
-      if (this.peek() === "else") {
+      if (this.peek() === "else")
         this.skipElseIfChain();
-      }
+      
     } else {
       this.skipBlock();
       // ? else if or else
       if (this.peek() === "else") {
         this.next();
-        if (this.peek() === "if") {
+        if (this.peek() === "if")
           elseValue = this.parseIfExpression();
-        } else if (this.peek() === "{") {
+        else if (this.peek() === "{") 
           elseValue = this.parseBlock();
-        } else {
+        else 
           throw {
             message: "Expected 'if' or '{' after 'else'",
             code: ExitCode.SystaxError,
           };
-        }
+        
       }
     }
 
@@ -1014,9 +1015,9 @@ export class Luz {
     if (value instanceof XRange) return "ran";
     if (value instanceof Range) return "xran";
 
-    if (typeof value === "object" && value !== null && "__type" in value) {
+    if (typeof value === "object" && value !== null && "__type" in value)
       return value.__type;
-    }
+    
 
     switch (typeof value) {
       case "number":
@@ -1089,21 +1090,20 @@ export class Luz {
         ].includes(this.peek());
       }
 
-      if (!isAssignment) throw new Error();
+      if (!isAssignment) throw new Error(); //TODO redo this
 
       this.pos = initialState.pos;
       this.vars = new Map(initialState.vars);
 
-
       if (this.isLiteralToken(this.peek()))
         throw {
-          message: `Cannot assign to literal '${this.asDebugStr(this.parsePrimary())}'`,
+          message: `Cannot assign to literal '${this.asDebugStr(
+            this.parsePrimary()
+          )}'`,
           code: ExitCode.SemanticError,
         };
 
       varName = this.next();
-
-     
 
       if (Luz.KEYWORDS.includes(varName as any))
         throw {
@@ -1115,19 +1115,19 @@ export class Luz {
         if (this.peek() === "[") {
           this.next();
           indices.push(this.parseExpression());
-          if (this.peek() !== "]") {
+          if (this.peek() !== "]") 
             throw { message: "Expected ']'", code: ExitCode.SystaxError };
-          }
+          
           this.next();
         } else if (this.peek() === ".") {
           this.next(); // Consume the dot
           const indexToken = this.next();
-          if (!this.isNumberToken(indexToken)) {
+          if (!this.isNumberToken(indexToken)) 
             throw {
               message: "Expected number after '.' for index access",
               code: ExitCode.SystaxError,
             };
-          }
+          
           const index = Number(indexToken.replace(/_/g, ""));
           indices.push(index);
         }
@@ -1137,12 +1137,12 @@ export class Luz {
       const rhs = this.parseAssignment();
 
       if (indices.length > 0) {
-        if (!varName || !this.vars.has(varName)) {
+        if (!varName || !this.vars.has(varName))
           throw {
             message: `Undefined variable '${varName}'`,
             code: ExitCode.SemanticError,
           };
-        }
+        
 
         const varData = this.vars.get(varName);
         if (varData.const) {
@@ -1159,11 +1159,11 @@ export class Luz {
             container &&
             typeof container === "object" &&
             "__value" in container
-          ) {
+          ) 
             container = container.__value[idx];
-          } else if (Array.isArray(container)) {
+           else if (Array.isArray(container)) 
             container = container[idx];
-          } else
+          else
             throw {
               message: `Cannot access index of non-array type for ${varName}`,
               code: ExitCode.SemanticError,
@@ -1215,18 +1215,18 @@ export class Luz {
               "__value" in current &&
               "__type" in current
             ) {
-              if (current.__type === "arr") {
+              if (current.__type === "arr")
                 throw {
                   message: `Cannot add '${this.asStr(
                     rhs
                   )}' to an 'arr', use 'vec' instead`,
                   code: ExitCode.InvalidInstruction,
                 };
-              } else if (current.__type === "vec") {
+               else if (current.__type === "vec") 
                 current.__value.push(rhs);
-              } else if (current.__type === "set") {
+               else if (current.__type === "set") 
                 current.__value.add(rhs);
-              }
+              
 
               result = current;
             } else if (current instanceof Range || current instanceof XRange) {
@@ -1240,9 +1240,9 @@ export class Luz {
 
               current.end += rhs;
               result = current;
-            } else {
+            } else 
               result = current + rhs;
-            }
+            
             break;
           case "-=":
             const __type = this.getType(current);
@@ -1284,7 +1284,9 @@ export class Luz {
             }
             break;
           case "*=":
-            result = current * rhs;
+            if (typeof current === "string" && typeof rhs === "number")
+              result = current.repeat(rhs);
+            else result = current * rhs;
             break;
           case "/=":
             result = current / rhs;
@@ -1303,28 +1305,28 @@ export class Luz {
             break;
         }
 
-        if (typeof current !== typeof result) {
+        if (typeof current !== typeof result) 
           throw {
             message: `Type mismatch in compound assignment for '${varName}'`,
             code: ExitCode.SemanticError,
           };
-        }
+        
       }
 
       if (varName) {
         if (this.vars.has(varName)) {
           const existingVar = this.vars.get(varName)!;
-          if (existingVar.const) {
+          if (existingVar.const)
             throw {
               message: `Cannot reassign constant '${varName}'`,
               code: ExitCode.SemanticError,
             };
-          }
+          
           this.vars.get(varName)!.value = result;
           existingVar.type = this.getType(result);
-        } else {
+        } else 
           this.vars.set(varName, { value: result, const: isConst, type });
-        }
+        
       }
 
       return result;
@@ -1332,9 +1334,9 @@ export class Luz {
       this.pos = initialState.pos;
       this.vars = new Map(initialState.vars);
 
-      if (e && e.code === ExitCode.SemanticError) {
+      if (e && e.code === ExitCode.SemanticError)
         throw e;
-      }
+      
       return this.parseRange();
     }
   }
@@ -1365,16 +1367,16 @@ export class Luz {
           ) {
             const __type: "arr" | "vec" | "set" = left.__type;
 
-            if (__type === "arr") {
+            if (__type === "arr") 
               throw {
                 message: `Cannot add '${right}' to an 'arr', use 'vec' instead`,
                 code: ExitCode.InvalidInstruction,
               };
-            } else if (__type === "vec") {
+            else if (__type === "vec")
               left.__value.push(right);
-            } else if (__type === "set") {
+            else if (__type === "set") 
               left.__value.add(right);
-            }
+            
           } else if (right instanceof Range || right instanceof XRange) {
             if (typeof left !== "number")
               throw {
@@ -1394,12 +1396,12 @@ export class Luz {
           ) {
             const __type: "arr" | "vec" | "set" = right.__type;
 
-            if (__type === "arr") {
+            if (__type === "arr")
               throw {
                 message: `Cannot add '${left}' to an 'arr', use 'vec' instead`,
                 code: ExitCode.InvalidInstruction,
               };
-            } else if (__type === "vec") {
+            else if (__type === "vec") {
               right.__value.unshift(left);
 
               left = right;
@@ -1427,12 +1429,12 @@ export class Luz {
           ) {
             const __type: "arr" | "vec" | "set" = left.__type;
 
-            if (__type === "arr") {
+            if (__type === "arr")
               throw {
                 message: `Cannot subtract '${right}' to an 'arr', use 'vec' instead`,
                 code: ExitCode.InvalidInstruction,
               };
-            } else if (__type === "vec") {
+            else if (__type === "vec") {
               for (let i = left.__value.length - 1; i >= 0; i--) {
                 const value = left.__value[i];
 
@@ -1466,12 +1468,12 @@ export class Luz {
           ) {
             const __type: "arr" | "vec" | "set" = right.__type;
 
-            if (__type === "arr") {
+            if (__type === "arr")
               throw {
                 message: `Cannot add '${left}' to an 'arr', use 'vec' instead`,
                 code: ExitCode.InvalidInstruction,
               };
-            } else if (__type === "vec") {
+            else if (__type === "vec") {
               for (let i = 0; i < right.__value.length; i++) {
                 const value = right.__value[i];
 
@@ -1488,9 +1490,9 @@ export class Luz {
             }
           } else left = left - right;
         }
-      } else {
+      } else 
         break;
-      }
+      
     }
     return left;
   }
@@ -1504,19 +1506,20 @@ export class Luz {
         this.next();
 
         const right = this.parseBitwise();
-        if (op === "*") left = left * right;
-        else if (op === "/" || op === "~/") {
+        if (op === "*") {
+          if (typeof left === "string" && typeof right === "number")
+            left = left.repeat(right);
+          else left = left * right;
+        } else if (op === "/" || op === "~/") {
           left = left / right;
           if (op === "~/") left = Math.floor(left);
         } else left = left % right;
-      } else {
-        break;
-      }
+      } else break;
     }
 
-    if (typeof left === "number" && Number.isNaN(left)) {
+    if (typeof left === "number" && Number.isNaN(left)) 
       return null;
-    }
+    
 
     return left;
   }
@@ -1531,14 +1534,14 @@ export class Luz {
 
         const right = this.parseMulDiv();
         left = left ** right;
-      } else {
+      } else 
         break;
-      }
+      
     }
 
-    if (typeof left === "number" && Number.isNaN(left)) {
+    if (typeof left === "number" && Number.isNaN(left)) 
       return null;
-    }
+    
 
     return left;
   }
@@ -1546,9 +1549,9 @@ export class Luz {
   private asStr(value: any, visited: Set<any> = new Set()): string {
     if (visited.has(value)) {
       //? Circular reference handling
-      if (value.__type === "set") {
+      if (value.__type === "set") 
         return "@{...}";
-      }
+      
       return `${value.__type === "vec" ? "!" : ""}[...]`;
     }
 
@@ -1561,20 +1564,20 @@ export class Luz {
       visited.add(value);
 
       let elements: string[];
-      if (value.__type === "set") {
+      if (value.__type === "set") 
         elements = Array.from(value.__value).map((el: any) =>
           this.asStr(el, visited)
         );
-      } else if (value.__type === "vec") {
+       else if (value.__type === "vec") {
         const vecValue = value.__value;
         const denseVec = [];
-        for (let i = 0; i < vecValue.length; i++) {
+        for (let i = 0; i < vecValue.length; i++) 
           denseVec.push(i in vecValue ? vecValue[i] : null);
-        }
+        
         elements = denseVec.map((el: any) => this.asStr(el, visited));
-      } else {
+      } else 
         elements = value.__value.map((el: any) => this.asStr(el, visited));
-      }
+      
 
       visited.delete(value);
       switch (value.__type) {
@@ -1602,9 +1605,9 @@ export class Luz {
   private asDebugStr(value: any, visited: Set<any> = new Set()): string {
     if (visited.has(value)) {
       //? Circular reference handling
-      if (value.__type === "set") {
+      if (value.__type === "set") 
         return "@{...}";
-      }
+      
       return `${value.__type === "vec" ? "!" : ""}[...]`;
     }
 
@@ -1617,20 +1620,20 @@ export class Luz {
       visited.add(value);
 
       let elements: string[];
-      if (value.__type === "set") {
+      if (value.__type === "set") 
         elements = Array.from(value.__value).map((el: any) =>
           this.asDebugStr(el, visited)
         );
-      } else if (value.__type === "vec") {
+      else if (value.__type === "vec") {
         const vecValue = value.__value;
         const denseVec = [];
-        for (let i = 0; i < vecValue.length; i++) {
+        for (let i = 0; i < vecValue.length; i++) 
           denseVec.push(i in vecValue ? vecValue[i] : null);
-        }
+        
         elements = denseVec.map((el: any) => this.asStr(el, visited));
-      } else {
+      } else 
         elements = value.__value.map((el: any) => this.asDebugStr(el, visited));
-      }
+      
 
       visited.delete(value);
       switch (value.__type) {
@@ -1673,16 +1676,16 @@ export class Luz {
 
           const typeReference = this.parseUnary();
           targetType = this.getType(typeReference);
-        } else {
+        } else 
           targetType = this.next() as (typeof Luz.TYPES)[number];
-        }
+        
 
-        if (!Luz.TYPES.includes(targetType)) {
+        if (!Luz.TYPES.includes(targetType)) 
           throw {
             message: `Invalid type '${targetType}' for casting`,
             code: ExitCode.SemanticError,
           };
-        }
+        
 
         if (left instanceof XRange || left instanceof Range) {
           const values = Array.from(left.__value);
@@ -1738,16 +1741,16 @@ export class Luz {
             if (left instanceof XRange || left instanceof Range) {
               const start = left.start;
               const end = left.end;
-              if (left instanceof XRange) {
+              if (left instanceof XRange) 
                 castedValue = start + Math.floor(Math.random() * (end - start));
-              } else {
+              else 
                 castedValue =
                   start + Math.floor(Math.random() * (end - start + 1));
-              }
+              
             } else if (typeof left === "string") {
-              if (left.length === 0) {
+              if (left.length === 0)
                 castedValue = null;
-              } else {
+              else {
                 const randomIndex = Math.floor(Math.random() * left.length);
                 castedValue = left[randomIndex];
               }
@@ -1757,9 +1760,9 @@ export class Luz {
               switch (type) {
                 case "arr":
                 case "vec":
-                  if (value.length === 0) {
+                  if (value.length === 0) 
                     castedValue = null;
-                  } else {
+                  else {
                     const randomIndex = Math.floor(
                       Math.random() * value.length
                     );
@@ -1768,9 +1771,9 @@ export class Luz {
                   break;
                 case "set":
                   const elements = Array.from(value);
-                  if (elements.length === 0) {
+                  if (elements.length === 0) 
                     castedValue = null;
-                  } else {
+                   else {
                     const randomIndex = Math.floor(
                       Math.random() * elements.length
                     );
@@ -1780,9 +1783,9 @@ export class Luz {
                 default:
                   castedValue = Math.random() > 0.5;
               }
-            } else {
+            } else 
               castedValue = Math.random() > 0.5;
-            }
+            
             break;
           case "arr":
             castedValue = Array.isArray(valueToCast)
@@ -1909,30 +1912,40 @@ export class Luz {
       this.tokens = originalTokens;
       this.pos = originalPos;
 
-      if (!lValue) {
+      if (!lValue) 
         throw {
           message: `Cannot apply unary '${operator}' to non-l-value '${variablePart}'`,
           code: ExitCode.SemanticError,
         };
-      }
+      
 
       let current = lValue.get();
 
       //? Check type
-      if (typeof current !== "number" && typeof current !== "bigint") {
+      if (
+        typeof current !== "number" &&
+        typeof current !== "bigint" &&
+        !(current instanceof Range) &&
+        !(current instanceof XRange)
+      ) 
         throw {
           message: `Cannot apply unary '${operator}' to non-numeric variable`,
           code: ExitCode.SemanticError,
         };
-      }
+      
 
-      let newValue: number | bigint;
+      let newValue: number | bigint | Range | XRange;
 
-      if (typeof current === "number") {
+      if (current instanceof Range || current instanceof XRange) {
+        if (operator === "++") current.start++;
+        else current.start--;
+
+        newValue = current;
+      } else if (typeof current === "number") 
         newValue = operator === "++" ? current + 1 : current - 1;
-      } else {
+       else 
         newValue = operator === "++" ? current + 1n : current - 1n;
-      }
+      
 
       lValue.set(newValue);
 
@@ -1951,12 +1964,12 @@ export class Luz {
     if (op === "~") {
       this.next();
       const rhs = this.parseUnary();
-      if (typeof rhs !== "number" && typeof rhs !== "bigint") {
+      if (typeof rhs !== "number" && typeof rhs !== "bigint") 
         throw {
           message: `Operand of bitwise NOT '~' must be a 'num' or 'xl'`,
           code: ExitCode.SemanticError,
         };
-      }
+      
       return ~rhs;
     }
 
@@ -2006,13 +2019,11 @@ export class Luz {
 
         if (this.stdinStack.length > 0) {
           const value = this.stdinStack.pop()!;
-          if (hasPrompt) {
-            if (!Luz.isTTY)
-              this.logFn(
-                `${value ?? ""}\n`
-              ); //! Maybe we dont want this behavior
+          if (hasPrompt)
+            if (!Luz.isTTY) this.logFn(`${value ?? ""}\n`);
+            //! Maybe we dont want this behavior
             else this.logFn("\n");
-          }
+
           // if (hasPrompt) this.logFn("\n"); //! do a newline
 
           return value;
@@ -2044,12 +2055,11 @@ export class Luz {
           return rhs.__value.length;
         else if (rhs.__type === "set") return rhs.__value.size;
       } else if (Array.isArray(rhs)) return rhs.length;
-      else {
+      else
         throw {
           message: `lenof not supported for ${typeof rhs}`,
           code: ExitCode.SemanticError,
         };
-      }
     }
 
     if (op === "copyof") {
@@ -2072,11 +2082,9 @@ export class Luz {
       if (typeof rhs === "object" && rhs !== null && "__value" in rhs) {
         const type: "vec" | "arr" | "set" = rhs.__type;
 
-        if (type === "vec" || type === "arr") {
-          return rhs.__value[0] ?? null;
-        } else if (type === "set") {
+        if (type === "vec" || type === "arr") return rhs.__value[0] ?? null;
+        else if (type === "set")
           return rhs.__value.values().next().value ?? null;
-        }
 
         return null; //?This shouldn't be reached!
       }
@@ -2098,11 +2106,9 @@ export class Luz {
       if (typeof rhs === "object" && rhs !== null && "__value" in rhs) {
         const type: "vec" | "arr" | "set" = rhs.__type;
 
-        if (type === "vec" || type === "arr") {
+        if (type === "vec" || type === "arr")
           return rhs.__value[rhs.__value.length - 1] ?? null;
-        } else if (type === "set") {
-          return rhs.__value.last ?? null;
-        }
+        else if (type === "set") return rhs.__value.last ?? null;
 
         return null; //This shouldn't be reached!
       }
@@ -2128,9 +2134,8 @@ export class Luz {
       let typeStr: (typeof Luz.TYPES)[number];
 
       //? Handle Luz structured types
-      if (operand && typeof operand === "object" && "__type" in operand) {
+      if (operand && typeof operand === "object" && "__type" in operand)
         typeStr = operand.__type;
-      }
       //? Handle primitive JS types
       else
         switch (typeof operand) {
@@ -2175,34 +2180,32 @@ export class Luz {
       }
 
       const lval = this.tryParseLValue();
-      if (!lval) {
+      if (!lval)
         throw {
           message: `Invalid deletion target`,
           code: ExitCode.SemanticError,
         };
-      }
 
       const value = lval.get();
-      if (typeof lval.delete === "function") {
-        lval.delete();
-      } else {
+      if (typeof lval.delete === "function") lval.delete();
+      else
         throw {
           message: `Delete operation not supported for this type`,
           code: ExitCode.SemanticError,
         };
-      }
+
       return value;
     }
 
     if (op === "+" || op === "-") {
       this.next();
       const rhs = this.parseUnary();
-      if (typeof rhs !== "number" && typeof rhs !== "bigint") {
+      if (typeof rhs !== "number" && typeof rhs !== "bigint")
         throw {
           message: `Operand of unary '${op}' must be a 'num' or 'xl'.`,
           code: ExitCode.SemanticError,
         };
-      }
+
       return op === "+" ? +(rhs as number) : -rhs;
     }
 
@@ -2217,32 +2220,30 @@ export class Luz {
     const op = this.peek();
 
     if (op === "++" || op === "--") {
-      if (!this.isVariableToken(operandToken)) {
+      if (!this.isVariableToken(operandToken))
         throw {
           message: `Cannot apply postfix '${op}' to non-variable '${operandToken}'`,
           code: ExitCode.SemanticError,
         };
-      }
 
-      if (!this.vars.has(operandToken)) {
+      if (!this.vars.has(operandToken))
         throw {
           message: `Variable '${operandToken}' is not defined for postfix operation`,
           code: ExitCode.SemanticError,
         };
-      }
 
       this.next();
 
       let current = this.vars.get(operandToken).value;
 
-      if (typeof current !== "number") {
+      if (typeof current !== "number")
         throw {
           message: `Cannot apply postfix '${op}' to non-numeric variable '${operandToken}'`,
           code: ExitCode.SemanticError,
         };
-      }
 
       const updated = op === "++" ? current + 1 : current - 1;
+
       this.vars.get(operandToken).value = updated;
 
       return current;
@@ -2257,9 +2258,8 @@ export class Luz {
     while (this.peek() === "&&") {
       this.next();
 
-      if (!left) {
-        this.parseExpression();
-      } else {
+      if (!left) this.parseExpression();
+      else {
         const right = this.parseExpression();
 
         left = left && right;
@@ -2274,9 +2274,8 @@ export class Luz {
     while (this.peek() === "??") {
       this.next();
 
-      if (left) {
-        this.parseLogicalAnd();
-      } else {
+      if (left) this.parseLogicalAnd();
+      else {
         const right = this.parseLogicalAnd();
 
         left = left ?? right;
@@ -2291,9 +2290,8 @@ export class Luz {
     while (this.peek() === "||") {
       this.next();
 
-      if (left) {
-        this.parseNullish();
-      } else {
+      if (left) this.parseNullish();
+      else {
         const right = this.parseNullish();
 
         left = left || right;
@@ -2325,12 +2323,11 @@ export class Luz {
             (typeof leftVal === "number" && typeof rightVal === "number") ||
             (typeof leftVal === "bigint" && typeof rightVal === "bigint")
           )
-        ) {
+        )
           throw {
             message: `Cannot compare non-numeric values with '${op}'`,
             code: ExitCode.SemanticError,
           };
-        }
 
         switch (op) {
           case "<":
@@ -2364,12 +2361,8 @@ export class Luz {
           const leftVal = this.getUnderlyingValue(left);
           const rightVal = this.getUnderlyingValue(right);
           left = op === "==" ? leftVal === rightVal : leftVal !== rightVal;
-        } else if (op === "has") {
-          left = this.checkHas(left, right);
-        }
-      } else {
-        break;
-      }
+        } else if (op === "has") left = this.checkHas(left, right);
+      } else break;
     }
     return left;
   }
@@ -2416,9 +2409,8 @@ export class Luz {
         if (depth === 0) {
           lastSemicolonPos = this.pos;
         }
-      } else if (token === "[" || token === "![") {
-        depth++;
-      } else if (token === "]") {
+      } else if (token === "[" || token === "![") depth++;
+      else if (token === "]") {
         depth--;
         if (depth < 0) break;
       }
@@ -2442,12 +2434,11 @@ export class Luz {
         Number.isNaN(length) ||
         length < 0 ||
         !Number.isInteger(length)
-      ) {
+      )
         throw {
           message: `Invalid 'arr' length '${lengthExpr}'`,
           code: ExitCode.SemanticError,
         };
-      }
 
       const postLengthPos = this.pos;
       const originalTokens = this.tokens;
@@ -2460,9 +2451,7 @@ export class Luz {
         this.pos = 0;
 
         let element = null;
-        while (this.pos < this.tokens.length) {
-          element = this.parseStatement();
-        }
+        while (this.pos < this.tokens.length) element = this.parseStatement();
 
         elements.push(element);
 
@@ -2477,12 +2466,12 @@ export class Luz {
       }
     }
 
-    if (this.peek() !== "]") {
+    if (this.peek() !== "]")
       throw {
         message: "Expected ']' after arr elements",
         code: ExitCode.SystaxError,
       };
-    }
+
     this.next();
 
     return elements;
@@ -2503,12 +2492,9 @@ export class Luz {
     while (this.pos < this.tokens.length) {
       const token = this.tokens[this.pos];
       if (token === ";") {
-        if (depth === 0) {
-          lastSemicolonPos = this.pos;
-        }
-      } else if (token === "[" || token === "![") {
-        depth++;
-      } else if (token === "]") {
+        if (depth === 0) lastSemicolonPos = this.pos;
+      } else if (token === "[" || token === "![") depth++;
+      else if (token === "]") {
         depth--;
         if (depth < 0) break;
       }
@@ -2532,12 +2518,11 @@ export class Luz {
         Number.isNaN(length) ||
         length < 0 ||
         !Number.isInteger(length)
-      ) {
+      )
         throw {
           message: `Invalid vec length '${this.asDebugStr(lengthExpr)}'`,
           code: ExitCode.SemanticError,
         };
-      }
 
       const postLengthPos = this.pos;
       const originalTokens = this.tokens;
@@ -2550,29 +2535,26 @@ export class Luz {
         this.pos = 0;
 
         let element = null;
-        while (this.pos < this.tokens.length) {
-          element = this.parseStatement();
-        }
+        while (this.pos < this.tokens.length) element = this.parseStatement();
 
         elements.push(element);
 
         this.tokens = originalTokens;
         this.pos = postLengthPos;
       }
-    } else {
+    } else
       while (this.peek() !== "]") {
         if (this.peek() === ",") this.next();
         const element = this.parseExpression();
         elements.push(element);
       }
-    }
 
-    if (this.peek() !== "]") {
+    if (this.peek() !== "]")
       throw {
         message: "Expected ']' after vector elements",
         code: ExitCode.SystaxError,
       };
-    }
+
     this.next();
 
     return elements;
@@ -2607,11 +2589,11 @@ export class Luz {
   }
 
   private getIndexValue(container: any, index: number): any {
-    if (typeof container === "string") {
+    if (typeof container === "string")
       return index >= 0 && index < container.length
         ? container.charAt(index)
         : null;
-    }
+
     const values = container?.__value || container;
     return values[index] ?? null;
   }
@@ -2628,14 +2610,14 @@ export class Luz {
     if (nextTok === "(") {
       this.next();
       const exprValue = this.parseExpression();
-      if (this.peek() !== ")") {
+      if (this.peek() !== ")")
         throw {
           message: `Expected ')' but found '${
             this.peek() === "\n" ? "\\n" : this.peek()
           }'`,
           code: ExitCode.SystaxError,
         };
-      }
+
       this.next();
       return exprValue;
     }
@@ -2700,41 +2682,46 @@ export class Luz {
         this.tokens = originalTokens;
         this.pos = originalPos;
 
-        if (!lValue) {
+        if (!lValue)
           throw {
             message: `Cannot apply postfix '${operator}' to non-l-value '${variablePart}'`,
             code: ExitCode.SemanticError,
           };
-        }
 
         const current = lValue.get();
 
-        if (typeof current !== "number" && typeof current !== "bigint") {
+        if (
+          typeof current !== "number" &&
+          typeof current !== "bigint" &&
+          !(current instanceof Range) &&
+          !(current instanceof XRange)
+        )
           throw {
             message: `Cannot apply postfix '${operator}' to non-numeric variable`,
             code: ExitCode.SemanticError,
           };
-        }
 
-        let newValue: number | bigint;
+        let newValue: number | bigint | Range | XRange;
 
-        if (typeof current === "number") {
+        if (current instanceof Range || current instanceof XRange) {
+          if (operator === "++") current.end++;
+          else current.end--;
+
+          newValue = current;
+        } else if (typeof current === "number")
           newValue = operator === "++" ? current + 1 : current - 1;
-        } else {
-          newValue = operator === "++" ? current + 1n : current - 1n;
-        }
+        else newValue = operator === "++" ? current + 1n : current - 1n;
 
         lValue.set(newValue);
 
         return current;
       } else {
         //* Variable handling!
-        if (!this.vars.has(tok)) {
+        if (!this.vars.has(tok))
           throw {
             message: `Variable '${tok}' is not defined`,
             code: ExitCode.SemanticError,
           };
-        }
 
         let value = this.vars.get(tok).value;
         while (true) {
@@ -2748,9 +2735,7 @@ export class Luz {
             }
             const index = Number(indexToken.replace(/_/g, ""));
             value = this.getIndexValue(value, index);
-          } else {
-            break;
-          }
+          } else break;
         }
         return value;
         // let value = this.vars.get(tok).value;
@@ -2769,12 +2754,11 @@ export class Luz {
     op: string,
     value: any
   ): void {
-    if (typeof container === "string") {
+    if (typeof container === "string")
       throw {
         message: "'str' is immutable, cannot modify characters",
         code: ExitCode.SemanticError,
       };
-    }
 
     const arr = container.__value;
     const isArr = container.__type === "arr";
@@ -2848,28 +2832,24 @@ export class Luz {
         return idx >= 0 && idx < values.length ? values[idx] : null;
       };
 
-      for (const idx of indices) {
-        elements.push(getElement(Number(idx)));
-      }
+      for (const idx of indices) elements.push(getElement(Number(idx)));
 
       //? return appropriate type
-      if (typeof container === "string") {
-        return elements.join("");
-      }
-      if (container?.__type) {
+      if (typeof container === "string") return elements.join("");
+
+      if (container?.__type)
         return {
           __type: container.__type,
           __value: container.__type === "set" ? new LuzSet(elements) : elements,
         };
-      }
+
       return elements;
     }
 
     const idx = this.evalIndex(indexExpr, container);
 
-    if (typeof container === "string") {
+    if (typeof container === "string")
       return idx >= 0 && idx < container.length ? container.charAt(idx) : null;
-    }
 
     const values = container?.__value || container;
     return values[idx] ?? null;
@@ -2884,13 +2864,11 @@ export class Luz {
       };
     }
 
-    if (typeof indexExpr === "object" && "__value" in indexExpr) {
+    if (typeof indexExpr === "object" && "__value" in indexExpr)
       indexValue = indexExpr.__value;
-    }
 
-    if (typeof indexValue !== "number" && typeof indexValue !== "bigint") {
+    if (typeof indexValue !== "number" && typeof indexValue !== "bigint")
       throw { message: "Index must be numeric", code: ExitCode.SemanticError };
-    }
 
     let idx = Number(indexValue);
     // const length =
@@ -3004,11 +2982,11 @@ export class Luz {
   }
 
   private isVariableToken(token: string): boolean {
-    return /^[\w\$áéíóúüñÁÉÍÓÚÜÑ]+$/.test(token);
+    return /^[\w\$]+$/.test(token);
   }
 
   private isInfToken(token: string): boolean {
-    return /^inf$/g.test(token);
+    return token === "inf";
   }
 
   private getBooleanToken(token: string): boolean {
@@ -3016,13 +2994,17 @@ export class Luz {
   }
 
   private getStrToken(token: string): string {
+    let isInterpolatedStr = token.startsWith("`");
     let processedToken = token
       .substring(1, token.length - 1)
+      .replace(/\r/g, "") //! this thingy
       .replace(/\\"/g, '"')
       .replace(/\\'/g, "'")
       .replace(/\\`/g, "`")
       .replace(/\\n/g, "\n")
       .replace(/\\t/g, "\t");
+
+    if (!isInterpolatedStr) return processedToken;
 
     let result = "";
     let currentPosInString = 0;
@@ -3043,9 +3025,8 @@ export class Luz {
 
       while (scanPos < processedToken.length && braceBalance > 0) {
         const char = processedToken[scanPos];
-        if (char === "{") {
-          braceBalance++;
-        } else if (char === "}") {
+        if (char === "{") braceBalance++;
+        else if (char === "}") {
           braceBalance--;
           if (braceBalance === 0) {
             closeBraceIndex = scanPos;
@@ -3055,12 +3036,11 @@ export class Luz {
         scanPos++;
       }
 
-      if (braceBalance !== 0 || closeBraceIndex === -1) {
+      if (braceBalance !== 0 || closeBraceIndex === -1)
         throw {
           message: `Unclosed interpolation block starting at index ${openBraceIndex} in string literal`,
           code: ExitCode.SystaxError,
         };
-      }
 
       const expression = processedToken
         .substring(openBraceIndex + 1, closeBraceIndex)
@@ -3073,9 +3053,8 @@ export class Luz {
         try {
           const expressionTokens = expression.match(Luz.tokensRegExp) ?? [];
 
-          if (expressionTokens.length === 0) {
-            result += "{}";
-          } else {
+          if (expressionTokens.length === 0) result += "{}";
+          else {
             this.tokens = expressionTokens;
             this.pos = 0;
 
@@ -3089,9 +3068,7 @@ export class Luz {
           this.pos = originalPos;
           this.tokens = originalTokens;
         }
-      } else {
-        result += "{}";
-      }
+      } else result += "{}";
 
       currentPosInString = closeBraceIndex + 1;
     }
