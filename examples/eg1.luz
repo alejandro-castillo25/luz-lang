@@ -1,0 +1,37 @@
+// Everything returns a value
+a = 23
+b = c = 12
+d = "str's!"
+
+// You can write something in the stdout with 'log' and 'logln'
+logln a * b + c - 277;
+logln d
+
+
+# So everything is a expression
+
+logln if a > b {
+    "a"
+} else {
+    "b"
+}
+
+// use 'if' and 'else' to have a nice looking control flow
+// if/else expression must always have '{}'
+age = 18
+log "You are "
+if age >= 18 {
+    logln 'an adult'
+} else {
+    logln "not an adult"
+}
+
+// You can have nested if/else's
+
+
+
+
+// You can also delete variables, so they're no longer avaliable
+del a
+
+

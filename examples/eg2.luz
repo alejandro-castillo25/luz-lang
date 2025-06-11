@@ -1,0 +1,36 @@
+# You can create constants, so no one messes with them!
+const A = "My Constant"
+
+b = const C = d = .1416
+
+logln A + " is really cool"
+
+// you can use str Interpolation with "`"
+log `b = {b}, c = {C} and d + 1 = {d + 1}`
+
+# Character Escape
+log "\n";
+
+// You can have ea better control flow with if's being expressions
+// it will return the last expression of the block or the else block if it's false
+// if there's no else null will be returned
+logln if !(10 == 10) {
+    "I'm unreachable!"
+}
+
+logln if false {} else {
+    "Value!"
+}
+
+//Variables are created to be used in the current scope
+if true {
+    myVar = true
+
+    if true {
+        logln myVar
+    }
+}
+// Down here, myVar no longer exists
+
+# You can also delete every variable in the current scope like so
+del *

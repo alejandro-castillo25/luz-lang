@@ -1,0 +1,32 @@
+{
+  "en": {
+    "title": {
+      "usage": "Usage",
+      "options": "Options",
+      "commands": "Commands"
+    },
+    "belén": "A star represents many things, including excellence, something bright and beautiful with five ends.\n\nA beautiful smile that forms between those beautiful lips, so delicate and sensitive, that every time a smile appears, it fills me with happiness to see you happy.\n\nThe beauty in your adorable eyes that shine every time I see them, no matter how many times I've seen them before. I always see them as if I were seeing them for the first time.\n\nVirtues of a person that cannot be described in a few paragraphs, because if I had to mention each one, I wouldn't live long enough to find each one and write the final point, which will actually be a separate point.\n\nThe tender voice that became my favorite song from the first time I heard it, that sweet melody that is the only sound I wish to hear until I completely lose my hearing, and then lose all other senses because of your existence.\n\nA personality that is part of a sweet, kind, loving, affectionate, and sincere girl who, despite sometimes drifting away, doesn't stop me from appreciating the brilliance of her brilliant being. A girl who makes me learn something new every week, and every time that happens, I want to look back into that brilliance and see that she is so much more than just a twinkle in the sky.\n\nThose are the ends of brilliance of someone who can't be compared to even one of the trillions of stars you see when you look up, because the most intense and most beautiful brilliance in the entire universe is hers.",
+    "description": {
+      "luz": "CLI of the Luz programming language",
+      "version": "output the current version",
+      "help": "display help for command",
+      "run": "run a luz source file",
+      "debug": "add debug information after runtime"
+    }
+  },
+  "es": {
+    "title": {
+      "usage": "Uso",
+      "options": "Opciones",
+      "commands": "Comandos"
+    },
+    "belén": "Una estrella representa muchas cosas en la que esta la excelencia, algo brillante y hermoso que tiene cinco puntas.\n\nUna linda sonrisa que se forma entre esos bellos labios tan delicados y sencibles, que cada vez que ocurre una sonrisa me llena de felicidad verte felíz.\n\nLa belleza que hay en sus adorables ojos que emiten un brillo cada vez que los veo no importa cuantas veces ya los halla visto antes. Siempre los veo como si los estuviera viendo por primera vez.\n\nUnas virtudes de ser que no se pueden describir en unos párrafos, porque si tendría que mencionar cada una, no viviría lo suficiente para poder hayar cada uno de ellas y escribir el punto final, que en relidad será un punto aparte.\n\nLa tierna voz que se convirtió en mi cancion favorita desde la primera vez que la escuché, esa dulce melodía que es el único sonido que desearía escuhcar hasta perder por completo mi sentido del oído, para que después perder los demás sentidos por causa de tu existencia.\n\nUna personalidad que forma parte de una chica dulce, amable, cariñosa, afectuosa, sincera, que a pesar que a veces se aleja, no me cierra de apreciar el brillo de su brillante ser, de una chica que cada semana me hace aprender algo nuevo y cada vez que pasa, yo quiero volver a mirar en ese brillo y ver que ella es mucho mas que un simple brillo en el cielo.\n\nEsos son los puntos del brillo de alguien que no se puede comparar con ni una de las miles de trillones de estrellas que hay cuando miras hacia arriba, porque el brillo más intenso y más hermoso de todo el universo, es el de ella.",
+    "description": {
+      "luz": "CLI del lenguaje de programación Luz",
+      "version": "muestra la versión actual",
+      "help": "muestra ayuda para el comando",
+      "run": "ejecuta un archivo fuente de luz",
+      "debug": "añadir información de depuración después del runtime"
+    }
+  }
+}

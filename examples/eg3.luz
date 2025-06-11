@@ -1,0 +1,78 @@
+# You can make loops with the 'loop' block, there are 3 types of loops
+# (so far)
+
+//? 1. "while loop"
+// The classic while loop, it'll run the block if th condition is true
+// otherwise it'll stop
+i = 0
+
+loop i <= 9 {
+    log i
+    i = i + 1
+}
+
+logln ""
+
+// Loops can be stopped in other ways too
+# Like if they reach the 'continue' or the 'break' keyword
+
+i = 1
+loop i <= 15 {
+    i = i + 1
+    if i % 2 != 0 {
+        continue
+    }
+    log `{i} `
+}
+
+log "\n";
+
+/*
+    When a loop ends "naturally" by its condition being false
+    it'll return the last expression inside its body
+*/
+
+j = i = 0;
+otherVar = loop j <= 10 {
+    logln `{j} and {i}`
+    j = j + 1
+    i = i - 1
+}
+
+logln otherVar
+
+
+# But we can change that behavior too with the 'break' keyword
+
+i = 10
+otherVar = loop i > 0 {
+
+    if i == 1 {
+        break 'ONE'
+    }
+
+    i = i - 1
+}
+
+logln otherVar
+
+# if no value is next to 'break' it'll return null
+
+j = 1
+newVar = otherVar = loop j <= 10 {
+    break;
+}
+logln otherVar
+
+
+# ';' are not required, MOST OF THE TIME
+# We would need them to prevent something taking over of an expression
+i = 0
+newVar = loop i > 10 {
+    break;
+    "A"
+}
+
+//If we didn't have placed ';' newVar would be "A" and not 'null'
+log newVar
+

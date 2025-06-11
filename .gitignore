@@ -35,7 +35,7 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 
 
 src/*.luz
-*.luz
+/*.luz
 out.txt
 in.txt
 proposal.txt

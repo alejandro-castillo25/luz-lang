@@ -1,0 +1,147 @@
+// Before we get into the 3rd loop kind we have to know more concepts
+// So let's dive more into types, because even though the types are not strict
+// There's types!
+
+//* The 'num' type
+// It can hold numbers... self explanatory, there's different ways to type them as literals
+
+logln "> num:"
+
+nums = 234
+logln nums
+
+nums = -20.2
+logln nums
+
+nums = 0.123
+logln nums
+
+nums = .10
+logln nums
+
+
+// You can use '_' with them and also use "e notation" as in other languages
+nums = 100_000_000
+logln nums
+
+nums = 1e5
+logln nums
+
+//if a num is too big or small it loses precision and then it becomes 'inf' which is a special type
+nums = 100_00000_00000 + 100_0000_0000 + 1E100 + 10e400
+logln nums
+
+
+logln '---'
+
+//* The 'inf' type 
+// You can get this type if 'num' gets too big or too small, as said previously
+// It can become useful in certain situations like with comparison
+logln "> inf:"
+
+logln inf
+logln -inf
+
+if inf > 1e50 {
+    logln `{inf} may seem situational, but it\'s useful`
+}
+
+logln '---'
+
+//* The 'str' type
+// You can handle "strings" with it, you can create it as a literal by 3 ways
+// Note that the "`" it's for str interpolation, so it'll look for values inside '{}'
+
+logln "> str:"
+
+strs = "Hello"
+logln strs;
+
+strs = 'World'
+logln strs;
+
+strs = `!`
+logln strs;
+
+
+
+// You can also use other escaped characters and use newlines
+strs = "This has
+a newline!"
+logln strs
+
+strs = 'this...\nalso has a newline!'
+logln strs
+
+strs = "tabs\t!"
+logln strs
+
+// The addition in a 'str' it's for concatenation
+logln "A" + " & " + 'B'
+logln strs += " YUH!"
+
+
+logln `---`
+//* The 'bool' type
+// The bool type can just be 'true' or 'false', it's useful for having flags
+// you can use logical operators with it such as '&&' (and), '||' (or), or ! (negation)
+// and comparisions return a bool
+logln "> bool:"
+
+bools = true
+logln bools
+bools = false
+logln bools
+
+logln true || false
+logln false || false
+
+logln true && false
+logln true && true
+
+logln !true
+logln !bools
+logln !!bools
+
+//Of course we use bool's for conditions
+
+if 2 != 4 {
+    logln "bool!"
+}
+
+if true && true {
+    logln "bools!"
+}
+
+i = 1;
+loop {
+    if i >= 5 {
+        break
+    }
+
+    log `bools-{i++} `
+
+    if i < 5 {
+        log "| "
+    }
+}
+
+logln "\n---"
+
+
+//* The 'num' type
+// The type null is very special, because some operations will throw 'null'
+// It's very important to handle errors when it's possible
+logln "> null:"
+
+a = null
+logln null
+
+a = 0 / 0 # this is null, because it's not possible
+logln a
+logln null == null
+
+// You can use the nullish operator, to have a fallback
+// So if the left hand-side is null, it'll return the right hand-side 
+a = null ?? "Fallback"
+logln a

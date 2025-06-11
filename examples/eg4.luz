@@ -1,0 +1,67 @@
+//? 2. "inf-loop"
+// It's called this way because it never stops, unless 'break' is reached
+// and because of the inf type (which is Infinity)
+
+thisGuy = inf
+anything = 10000000
+
+if anything > inf {
+    log "No way"
+}
+
+// It sounds useless, but it's useful in certain condition
+// and it's used when you want to get a certain value of the loop
+
+i = 1
+a = loop {
+    if i % 5 == 0 {
+        break i
+    }
+
+    i = i + 1
+}
+
+logln a
+
+// There's also compound assignments, which is handy
+
+i = 1
+i += 4
+i *= 10
+i /= 2
+
+logln i
+
+logln '---'
+
+# And the prefix and postfix '++' and '--', which adds/substracts the variable by one
+
+i++
+i--
+--i
+
+// If it's prefix it'll add/subtract the value first and then it'll return it
+// If it's postfix it'll return the current value and then add/subtract the var
+logln i
+logln ++i
+logln i++
+
+logln "---"
+
+logln i
+logln --i
+logln i--
+
+// Now we can make certain stuff with less code
+
+first13 = null
+i = 0
+
+first13 = loop {
+    if i == 13 {
+        break i
+    }
+    i++
+}
+
+logln `\nWe found our {first13}!`
