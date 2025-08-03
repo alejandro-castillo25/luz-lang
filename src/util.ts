@@ -116,14 +116,17 @@ export function handleRawCliArgs(args: Array<string>): void {
   const isRamirez = (arg?: string) => /^ram(i|í)rez$/i.test(arg ?? "");
   const isApaza = (arg?: string) => /^apaza$/i.test(arg ?? "");
 
+
   if (
     (isBelen(arg0) && isRamirez(arg1) && isApaza(arg2) && !arg3) ||
-    (isRamirez(arg0) && isApaza(arg1) && !arg2)
+    (isRamirez(arg0) && isApaza(arg1) && !arg2) ||
+    (isRamirez(arg0) && !arg1) ||
+    (isBelen(arg0) && (!arg1 || isRamirez(arg1)))
   ) {
     console.log(
       wrapAnsi(
         `
-        ${TEXTS["belén"]}
+        ${chalk.blueBright(TEXTS["belén"])}
         
         `,
         Math.floor(process.stdout.columns * 0.85)

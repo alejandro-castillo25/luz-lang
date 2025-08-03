@@ -75,4 +75,3 @@ newVar = loop i > 10 {
 
 //If we didn't have placed ';' newVar would be "A" and not 'null'
 log newVar
-

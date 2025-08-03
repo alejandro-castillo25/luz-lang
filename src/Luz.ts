@@ -356,7 +356,7 @@ export class Luz {
       const b = right.get();
       left.set(b);
       right.set(a);
-      return true;
+      return a === b;
     } catch (e: any) {
       this.pos = startPos;
       this.vars = new Map(initialState.vars);
