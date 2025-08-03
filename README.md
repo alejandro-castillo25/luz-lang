@@ -60,7 +60,7 @@ This project was created using `bun init` in bun v1.2.9. [Bun](https://bun.sh) i
 
 <pre>
 parseExpression
-|> parseAssignment // =, +=, ...
+|> parseAssignment // =, +=
     |> parseRange   // .. ..=
         |> parseLogicalOr   // ||
             |> parseNullish   // ??
@@ -72,10 +72,10 @@ parseExpression
                                     |> parsePow // **
                                         |> parseBitwise // &, |, ^, <<, >>, >>>
                                             |> parseAs // as
-                                                |> parseUnary  // prefix +/-, ++/--, !, ~, {puts}, del
+                                                |> parseUnary  // prefix +/-, ++/--, !, ~, del
                                                     |> parsePostfix // ++/--
                                                         |> parseIfExpression // if, else
                                                             |> parseLoopExpression // loop
-                                                                |> parsePrimary // literals, vars, (), ...
+                                                                |> parsePrimary // literals, vars, ()
 
 </pre>
